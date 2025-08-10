@@ -636,7 +636,7 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
 
     // AiBottomSheet.Listener
     override fun onGenerateFromPrompt(prompt: String) {
-        val system = "You generate note content clearly formatted for a note-taking app."
+        val system = "You are NoteX AI. Generate well-structured note content for a note-taking app. Use concise paragraphs and lists when appropriate. Preserve user intent. Output plain text only. User prompt follows:"
         binding.AISummarySection.visibility = View.GONE
         lifecycleScope.launch {
             binding.EnterBody.isEnabled = false
@@ -659,7 +659,7 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.NOTE -> model.body.toString()
             Type.LIST -> Operations.getBody(model.items)
         }
-        val system = "Summarize the note in concise bullet points."
+        val system = "You are NoteX AI. Summarize the following note in concise bullet points (5-8), omit fluff, retain key facts. Output plain text only."
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
                 result.onSuccess { content ->
@@ -677,7 +677,7 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.NOTE -> model.body.toString()
             Type.LIST -> Operations.getBody(model.items)
         }
-        val system = "Rewrite the note to improve clarity and style without changing meaning."
+        val system = "You are NoteX AI. Enhance the following note for clarity, style, and readability without changing meaning. Keep structure similar; output plain text only."
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
                 result.onSuccess { content ->
@@ -695,7 +695,7 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.NOTE -> model.body.toString()
             Type.LIST -> Operations.getBody(model.items)
         }
-        val system = "Proofread the note, fixing grammar and spelling without changing tone."
+        val system = "You are NoteX AI. Proofread the note, fixing grammar, punctuation, and typos without changing tone or meaning. Output plain text only."
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
                 result.onSuccess { content ->
@@ -713,7 +713,7 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.NOTE -> model.body.toString()
             Type.LIST -> Operations.getBody(model.items)
         }
-        val system = "Extend the note by elaborating key points. Append new content after the original."
+        val system = "You are NoteX AI. Extend the note by elaborating key points. Provide additional helpful details and examples. Output plain text that can be appended."
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
                 result.onSuccess { content ->

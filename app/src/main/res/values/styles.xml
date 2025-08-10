@@ -1,5 +1,14 @@
 <resources>
 
+    <style name="ShapeAppearance.App.Corner.30dp" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">30dp</item>
+    </style>
+
+    <style name="Widget.App.Button.Pill" parent="Widget.Material3.Button">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.App.Corner.30dp</item>
+    </style>
+
     <style name="Base.AppTheme" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorSecondary">?attr/colorPrimary</item>
         <item name="colorOnSecondary">?attr/colorOnPrimary</item>
@@ -25,11 +34,9 @@
         <item name="materialAlertDialogTheme">@style/AlertDialog</item>
     </style>
 
-    <style name="AppTheme" parent="Base.AppTheme">
-        <item name="colorPrimaryDark">@color/Black</item>
-        <item name="colorPrimary">@color/LightBlue500</item>
-        <item name="alternateFabTint">@color/LightBlue500</item>
-        <item name="alternateFabBackground">@color/Blue50</item>
+    <style name="AppTheme" parent="AppTheme.M3">
+        <item name="alternateFabTint">?attr/colorPrimary</item>
+        <item name="alternateFabBackground">?attr/colorPrimaryContainer</item>
     </style>
 
     <style name="MainActivity" parent="AppTheme">

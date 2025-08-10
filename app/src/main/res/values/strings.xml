@@ -194,4 +194,5 @@
     <string name="ai_note_empty">Note must not be empty</string>
     <string name="ai_summary_too_short">Add at least 100 words to summarize</string>
     <string name="ai_generating">Generating…</string>
+    <string name="generating_content">Generating content…</string>
 </resources>

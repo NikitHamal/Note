@@ -153,4 +153,50 @@
 
     </androidx.core.widget.NestedScrollView>
 
+    <com.facebook.shimmer.ShimmerFrameLayout
+        android:id="@+id/ShimmerGenerating"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:visibility="gone"
+        app:shimmer_auto_start="false">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/generating_content"
+            android:textAppearance="?attr/textAppearanceHeadline6" />
+
+    </com.facebook.shimmer.ShimmerFrameLayout>
+
+    <com.facebook.shimmer.ShimmerFrameLayout
+        android:id="@+id/ShimmerTextPlaceholder"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:layout_alignStart="@id/ScrollView"
+        android:layout_alignTop="@id/ScrollView"
+        android:layout_alignEnd="@id/ScrollView"
+        android:layout_alignBottom="@id/ScrollView"
+        android:visibility="gone"
+        app:shimmer_auto_start="false">
+
+        <include layout="@layout/shimmer_placeholder_layout" />
+
+    </com.facebook.shimmer.ShimmerFrameLayout>
+
+    <com.facebook.shimmer.ShimmerFrameLayout
+        android:id="@+id/ShimmerExtend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/ScrollView"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:visibility="gone"
+        app:shimmer_auto_start="false">
+
+        <include layout="@layout/shimmer_placeholder_layout" />
+
+    </com.facebook.shimmer.ShimmerFrameLayout>
+
 </RelativeLayout>

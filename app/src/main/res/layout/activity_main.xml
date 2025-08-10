@@ -58,8 +58,6 @@
             android:contentDescription="@string/make_list"
             android:tooltipText="@string/make_list"
             app:backgroundTint="?attr/alternateFabBackground"
-            app:elevation="2dp"
-            app:pressedTranslationZ="4dp"
             app:srcCompat="@drawable/checkbox"
             app:tint="?attr/alternateFabTint" />
 

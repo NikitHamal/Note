@@ -638,12 +638,17 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
         binding.AISummarySection.visibility = View.GONE
         lifecycleScope.launch {
             binding.EnterBody.isEnabled = false
+            binding.ShimmerBody.visibility = View.VISIBLE
+            binding.ShimmerBody.startShimmer()
         }
         aiClient.chatComplete(system, prompt, assistantContent = null, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerBody.stopShimmer()
+                binding.ShimmerBody.visibility = View.GONE
                 binding.EnterBody.isEnabled = true
                 result.onSuccess { content ->
-                    model.body = Editable.Factory.getInstance().newEditable(content)
+                    val formatted = formatContent(content)
+                    model.body = Editable.Factory.getInstance().newEditable(formatted)
                     binding.EnterBody.text = model.body
                 }.onFailure {
                     Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
@@ -658,11 +663,16 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Summarize the following note in concise bullet points (5-8), omit fluff, retain key facts. Output plain text only."
+        lifecycleScope.launch {
+            binding.AISummarySection.visibility = View.VISIBLE
+            binding.AISummarySection.text = getString(R.string.ai_generating)
+        }
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
                 result.onSuccess { content ->
+                    val bullets = toBulletedList(content)
                     binding.AISummarySection.visibility = View.VISIBLE
-                    binding.AISummarySection.text = content
+                    binding.AISummarySection.text = bullets
                 }.onFailure {
                     Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
                 }
@@ -676,10 +686,19 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Enhance the following note for clarity, style, and readability without changing meaning. Keep structure similar; output plain text only."
+        lifecycleScope.launch {
+            binding.EnterBody.isEnabled = false
+            binding.ShimmerBody.visibility = View.VISIBLE
+            binding.ShimmerBody.startShimmer()
+        }
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerBody.stopShimmer()
+                binding.ShimmerBody.visibility = View.GONE
+                binding.EnterBody.isEnabled = true
                 result.onSuccess { content ->
-                    model.body = Editable.Factory.getInstance().newEditable(content)
+                    val formatted = formatContent(content)
+                    model.body = Editable.Factory.getInstance().newEditable(formatted)
                     binding.EnterBody.text = model.body
                 }.onFailure {
                     Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
@@ -694,10 +713,19 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Proofread the note, fixing grammar, punctuation, and typos without changing tone or meaning. Output plain text only."
+        lifecycleScope.launch {
+            binding.EnterBody.isEnabled = false
+            binding.ShimmerBody.visibility = View.VISIBLE
+            binding.ShimmerBody.startShimmer()
+        }
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerBody.stopShimmer()
+                binding.ShimmerBody.visibility = View.GONE
+                binding.EnterBody.isEnabled = true
                 result.onSuccess { content ->
-                    model.body = Editable.Factory.getInstance().newEditable(content)
+                    val formatted = formatContent(content)
+                    model.body = Editable.Factory.getInstance().newEditable(formatted)
                     binding.EnterBody.text = model.body
                 }.onFailure {
                     Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
@@ -712,10 +740,17 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Extend the note by elaborating key points. Provide additional helpful details and examples. Output plain text that can be appended."
+        lifecycleScope.launch {
+            binding.ShimmerBody.visibility = View.VISIBLE
+            binding.ShimmerBody.startShimmer()
+        }
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerBody.stopShimmer()
+                binding.ShimmerBody.visibility = View.GONE
                 result.onSuccess { content ->
-                    val appended = current.trimEnd() + "\n\n" + content.trim()
+                    val formatted = formatContent(content)
+                    val appended = current.trimEnd() + "\n\n" + formatted.trim()
                     model.body = Editable.Factory.getInstance().newEditable(appended)
                     binding.EnterBody.text = model.body
                 }.onFailure {
@@ -733,6 +768,32 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
     override fun noteWordCount(): Int {
         val text = when (type) { Type.NOTE -> model.body.toString(); Type.LIST -> Operations.getBody(model.items) }
         return text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
+    }
+
+    private fun toBulletedList(text: String): String {
+        val lines = text.trim().lines().filter { it.isNotBlank() }
+        return lines.joinToString("\n") { line ->
+            val clean = line.replace(Regex("^[-*•\\d+.\\) ]+"), "").trim()
+            "• $clean"
+        }
+    }
+
+    private fun formatContent(text: String): String {
+        val normalized = text.trim()
+        // Insert blank lines before headings-like lines to improve readability
+        val sb = StringBuilder()
+        for (line in normalized.lines()) {
+            val l = line.trimEnd()
+            if (l.matches(Regex("^[A-Z][A-Za-z0-9 ,.()'-]{2,}$")) && l.length < 80) {
+                if (sb.isNotEmpty()) sb.append('\n')
+                sb.append(l).append('\n')
+            } else if (l.matches(Regex("^[-*•].+"))) {
+                sb.append(l.replace(Regex("^[-*•]"), "•")).append('\n')
+            } else {
+                sb.append(l).append('\n')
+            }
+        }
+        return sb.toString().trimEnd()
     }
 
     companion object {

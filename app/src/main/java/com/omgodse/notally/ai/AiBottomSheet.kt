@@ -2,13 +2,13 @@ package com.omgodse.notally.ai
 
 import android.content.Context
 import android.os.Bundle
-import android.text.Editable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.Toast
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.omgodse.notally.databinding.DialogAiBottomSheetBinding
+import com.omgodse.notally.R
 
 class AiBottomSheet : BottomSheetDialogFragment() {
 
@@ -22,8 +22,6 @@ class AiBottomSheet : BottomSheetDialogFragment() {
         fun noteWordCount(): Int
     }
 
-    private var _binding: DialogAiBottomSheetBinding? = null
-    private val binding get() = _binding!!
     private var listener: Listener? = null
 
     override fun onAttach(context: Context) {
@@ -32,30 +30,36 @@ class AiBottomSheet : BottomSheetDialogFragment() {
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-        _binding = DialogAiBottomSheetBinding.inflate(inflater, container, false)
-        return binding.root
+        return inflater.inflate(R.layout.dialog_ai_bottom_sheet, container, false)
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        binding.GenerateButton.setOnClickListener {
-            val prompt = binding.PromptInput.editText?.text?.toString()?.trim().orEmpty()
+        val promptEdit = view.findViewById<EditText>(R.id.PromptSingleLine)
+        val generate = view.findViewById<View>(R.id.GenerateButton)
+        val summarize = view.findViewById<View>(R.id.ActionSummarize)
+        val enhance = view.findViewById<View>(R.id.ActionEnhance)
+        val proofread = view.findViewById<View>(R.id.ActionProofread)
+        val extend = view.findViewById<View>(R.id.ActionExtend)
+
+        generate.setOnClickListener {
+            val prompt = promptEdit.text?.toString()?.trim().orEmpty()
             if (prompt.isEmpty()) {
                 Toast.makeText(requireContext(), "Enter a prompt", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
+            } else {
+                listener?.onGenerateFromPrompt(prompt)
+                dismissAllowingStateLoss()
             }
-            listener?.onGenerateFromPrompt(prompt)
-            dismissAllowingStateLoss()
         }
 
-        val disableActions = listener?.isNoteEmpty() == true
-        binding.ActionSummarize.isEnabled = !disableActions
-        binding.ActionEnhance.isEnabled = !disableActions
-        binding.ActionProofread.isEnabled = !disableActions
-        binding.ActionExtend.isEnabled = !disableActions
+        val disable = listener?.isNoteEmpty() == true
+        summarize.isEnabled = !disable
+        enhance.isEnabled = !disable
+        proofread.isEnabled = !disable
+        extend.isEnabled = !disable
 
-        binding.ActionSummarize.setOnClickListener {
+        summarize.setOnClickListener {
             val count = listener?.noteWordCount() ?: 0
             if (count < 100) {
                 Toast.makeText(requireContext(), "Add at least 100 words to summarize", Toast.LENGTH_SHORT).show()
@@ -64,19 +68,8 @@ class AiBottomSheet : BottomSheetDialogFragment() {
                 dismissAllowingStateLoss()
             }
         }
-        binding.ActionEnhance.setOnClickListener {
-            listener?.onEnhance(); dismissAllowingStateLoss()
-        }
-        binding.ActionProofread.setOnClickListener {
-            listener?.onProofread(); dismissAllowingStateLoss()
-        }
-        binding.ActionExtend.setOnClickListener {
-            listener?.onExtend(); dismissAllowingStateLoss()
-        }
-    }
-
-    override fun onDestroyView() {
-        super.onDestroyView()
-        _binding = null
+        enhance.setOnClickListener { listener?.onEnhance(); dismissAllowingStateLoss() }
+        proofread.setOnClickListener { listener?.onProofread(); dismissAllowingStateLoss() }
+        extend.setOnClickListener { listener?.onExtend(); dismissAllowingStateLoss() }
     }
 }

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="16dp">
+
+    <!-- Line 1 - Full width -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="14dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <!-- Line 2 - Full width -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="14dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <!-- Line 3 - 90% width -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="14dp"
+        android:layout_weight="0.9"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <!-- Line 4 - 75% width -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="14dp"
+        android:layout_weight="0.75"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <!-- Line 5 - 85% width -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="14dp"
+        android:layout_weight="0.85"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <!-- Line 6 - 60% width (shorter ending) -->
+    <View
+        android:layout_width="0dp"
+        android:layout_height="14dp"
+        android:layout_weight="0.6"
+        android:background="@drawable/shimmer_background" />
+
+</LinearLayout>

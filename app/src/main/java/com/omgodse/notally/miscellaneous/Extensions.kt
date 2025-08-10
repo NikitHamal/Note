@@ -1,6 +1,8 @@
 package com.omgodse.notally.miscellaneous
 
+import android.content.Context
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.text.Editable
 import android.text.InputType
 import android.text.Spannable
@@ -14,6 +16,8 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.DrawableCompat
 import com.omgodse.notally.activities.TakeNote
 import com.omgodse.notally.room.SpanRepresentation
 

@@ -34,7 +34,7 @@
         <item name="materialAlertDialogTheme">@style/AlertDialog</item>
     </style>
 
-    <style name="AppTheme" parent="AppTheme.M3">
+    <style name="AppTheme" parent="Theme.Material3.DayNight.DynamicColors">
         <item name="alternateFabTint">?attr/colorPrimary</item>
         <item name="alternateFabBackground">?attr/colorPrimaryContainer</item>
     </style>

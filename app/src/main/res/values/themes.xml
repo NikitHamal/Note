@@ -5,7 +5,7 @@
     This theme will be used on devices running Android 12+ that support dynamic colors.
     On other devices, it will fall back to a default Material 3 theme.
     -->
-    <style name="AppTheme.M3" parent="Theme.Material3.DayNight.DynamicColors">
+    <style name="AppTheme.M3" parent="@style/Theme.Material3.DayNight.DynamicColors">
         <!-- Add any top-level customizations here -->
     </style>
 </resources>

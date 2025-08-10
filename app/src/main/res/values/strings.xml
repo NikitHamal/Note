@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">Notally</string>
+    <string name="app_name" translatable="false">NoteX</string>
 
     <!-- Fragment Titles -->
     <string name="notes">Notes</string>

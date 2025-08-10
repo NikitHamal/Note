@@ -40,7 +40,7 @@ class AiBottomSheet : BottomSheetDialogFragment() {
         super.onViewCreated(view, savedInstanceState)
 
         binding.GenerateButton.setOnClickListener {
-            val prompt = binding.PromptInput.editText?.text?.toString()?.trim().orEmpty()
+            val prompt = binding.PromptInput.text?.toString()?.trim().orEmpty()
             if (prompt.isEmpty()) {
                 Toast.makeText(requireContext(), "Enter a prompt", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener

@@ -86,6 +86,13 @@
                 android:paddingEnd="24dp"
                 android:textAppearance="?attr/textAppearanceBody1" />
 
+            <!-- Shimmer view for AI loading states -->
+            <com.omgodse.notally.ai.ShimmerView
+                android:id="@+id/ShimmerView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/AISummarySection"
                 android:layout_width="match_parent"

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="24dp"
+    android:paddingEnd="24dp"
+    android:paddingTop="8dp">
+
+    <!-- Spacing to simulate continuing from existing text -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="8dp" />
+
+    <!-- Extended content shimmer lines -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="14dp"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="14dp"
+        android:layout_weight="0.88"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="14dp"
+        android:layout_weight="0.92"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/shimmer_background" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="14dp"
+        android:layout_weight="0.7"
+        android:background="@drawable/shimmer_background" />
+
+</LinearLayout>

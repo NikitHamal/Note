@@ -636,11 +636,16 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
     override fun onGenerateFromPrompt(prompt: String) {
         val system = "You are NoteX AI. Generate well-structured note content for a note-taking app. Use concise paragraphs and lists when appropriate. Preserve user intent. Output plain text only. User prompt follows:"
         binding.AISummarySection.visibility = View.GONE
+        
+        // Show generating shimmer effect
+        binding.ShimmerView.startShimmer(com.omgodse.notally.ai.ShimmerView.ShimmerType.GENERATING_TEXT)
+        
         lifecycleScope.launch {
             binding.EnterBody.isEnabled = false
         }
         aiClient.chatComplete(system, prompt, assistantContent = null, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerView.stopShimmer()
                 binding.EnterBody.isEnabled = true
                 result.onSuccess { content ->
                     model.body = Editable.Factory.getInstance().newEditable(content)
@@ -658,12 +663,20 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Summarize the following note in concise bullet points (5-8), omit fluff, retain key facts. Output plain text only."
+        
+        // Show shimmer on the summary section
+        binding.AISummarySection.visibility = View.VISIBLE
+        binding.AISummarySection.text = ""
+        binding.ShimmerView.startShimmer(com.omgodse.notally.ai.ShimmerView.ShimmerType.TEXT_LINES)
+        
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerView.stopShimmer()
                 result.onSuccess { content ->
                     binding.AISummarySection.visibility = View.VISIBLE
                     binding.AISummarySection.text = content
                 }.onFailure {
+                    binding.AISummarySection.visibility = View.GONE
                     Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
                 }
             }
@@ -676,8 +689,15 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Enhance the following note for clarity, style, and readability without changing meaning. Keep structure similar; output plain text only."
+        
+        // Show shimmer over the existing text content
+        binding.EnterBody.isEnabled = false
+        binding.ShimmerView.startShimmer(com.omgodse.notally.ai.ShimmerView.ShimmerType.TEXT_LINES)
+        
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerView.stopShimmer()
+                binding.EnterBody.isEnabled = true
                 result.onSuccess { content ->
                     model.body = Editable.Factory.getInstance().newEditable(content)
                     binding.EnterBody.text = model.body
@@ -694,8 +714,15 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Proofread the note, fixing grammar, punctuation, and typos without changing tone or meaning. Output plain text only."
+        
+        // Show shimmer over the existing text content
+        binding.EnterBody.isEnabled = false
+        binding.ShimmerView.startShimmer(com.omgodse.notally.ai.ShimmerView.ShimmerType.TEXT_LINES)
+        
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerView.stopShimmer()
+                binding.EnterBody.isEnabled = true
                 result.onSuccess { content ->
                     model.body = Editable.Factory.getInstance().newEditable(content)
                     binding.EnterBody.text = model.body
@@ -712,8 +739,15 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), Ai
             Type.LIST -> Operations.getBody(model.items)
         }
         val system = "You are NoteX AI. Extend the note by elaborating key points. Provide additional helpful details and examples. Output plain text that can be appended."
+        
+        // Show extend shimmer after the existing content
+        binding.EnterBody.isEnabled = false
+        binding.ShimmerView.startShimmer(com.omgodse.notally.ai.ShimmerView.ShimmerType.EXTEND_LINES)
+        
         aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
             runOnUiThread {
+                binding.ShimmerView.stopShimmer()
+                binding.EnterBody.isEnabled = true
                 result.onSuccess { content ->
                     val appended = current.trimEnd() + "\n\n" + content.trim()
                     model.body = Editable.Factory.getInstance().newEditable(appended)

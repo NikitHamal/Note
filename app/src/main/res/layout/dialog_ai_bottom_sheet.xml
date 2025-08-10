@@ -23,7 +23,7 @@
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/GenerateButton"
-        style="@style/Widget.MaterialComponents.Button"
+        style="@style/Widget.Material3.Button.UnelevatedButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
@@ -36,7 +36,7 @@
         android:layout_height="1dp"
         android:layout_marginTop="20dp"
         android:layout_marginBottom="16dp"
-        android:background="?attr/colorControlNormal" />
+        android:background="?attr/colorOutlineVariant" />
 
     <GridLayout
         android:layout_width="match_parent"
@@ -48,7 +48,7 @@
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ActionSummarize"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_columnWeight="1"
@@ -57,11 +57,11 @@
             android:text="@string/ai_summarize"
             app:cornerRadius="24dp"
             app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorControlNormal" />
+            app:strokeColor="?attr/colorOutline" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ActionEnhance"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_columnWeight="1"
@@ -70,11 +70,11 @@
             android:text="@string/ai_enhance"
             app:cornerRadius="24dp"
             app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorControlNormal" />
+            app:strokeColor="?attr/colorOutline" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ActionProofread"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_columnWeight="1"
@@ -82,11 +82,11 @@
             android:text="@string/ai_proofread"
             app:cornerRadius="24dp"
             app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorControlNormal" />
+            app:strokeColor="?attr/colorOutline" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/ActionExtend"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_columnWeight="1"
@@ -94,7 +94,7 @@
             android:text="@string/ai_extend"
             app:cornerRadius="24dp"
             app:strokeWidth="1dp"
-            app:strokeColor="?attr/colorControlNormal" />
+            app:strokeColor="?attr/colorOutline" />
 
     </GridLayout>
 

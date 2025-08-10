@@ -183,4 +183,15 @@
     <string name="repeats_monthly">%1$s, Repeats monthly</string>
     <string name="please_grant_notally_notification">Please grant Notally the permission to send notifications</string>
     <string name="please_grant_notally_alarm">Please grant Notally the permission to set alarms</string>
+
+    <string name="ai">AI</string>
+    <string name="generate">Generate</string>
+    <string name="ai_prompt_hint">Describe what you want to generate</string>
+    <string name="ai_summarize">Summarize</string>
+    <string name="ai_enhance">Enhance</string>
+    <string name="ai_proofread">Proofreading</string>
+    <string name="ai_extend">Extend</string>
+    <string name="ai_note_empty">Note must not be empty</string>
+    <string name="ai_summary_too_short">Add at least 100 words to summarize</string>
+    <string name="ai_generating">Generating…</string>
 </resources>

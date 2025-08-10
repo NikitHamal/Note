@@ -86,6 +86,17 @@
                 android:paddingEnd="24dp"
                 android:textAppearance="?attr/textAppearanceBody1" />
 
+            <TextView
+                android:id="@+id/AISummarySection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="24dp"
+                android:paddingTop="12dp"
+                android:paddingEnd="24dp"
+                android:paddingBottom="12dp"
+                android:textAppearance="?attr/textAppearanceBody2"
+                android:visibility="gone" />
+
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/RecyclerView"
                 android:layout_width="match_parent"

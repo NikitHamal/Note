@@ -30,6 +30,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.PagerSnapHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.omgodse.notally.ai.AiBottomSheet
+import com.omgodse.notally.ai.AiClient
 import com.omgodse.notally.R
 import com.omgodse.notally.databinding.ActivityNotallyBinding
 import com.omgodse.notally.databinding.DialogProgressBinding
@@ -54,10 +56,16 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Calendar
 
-abstract class NotallyActivity(private val type: Type) : AppCompatActivity() {
+// AI imports
+import com.omgodse.notally.ai.AiClient
+import com.omgodse.notally.ai.AiBottomSheet
+
+abstract class NotallyActivity(private val type: Type) : AppCompatActivity(), AiBottomSheet.Listener {
 
     internal lateinit var binding: ActivityNotallyBinding
     internal val model: NotallyModel by viewModels()
+
+    private val aiClient by lazy { AiClient() }
 
     override fun finish() {
         lifecycleScope.launch {
@@ -547,6 +555,9 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity() {
         binding.Toolbar.setNavigationOnClickListener { finish() }
 
         val menu = binding.Toolbar.menu
+        // AI item before pin
+        menu.add(R.string.ai, R.drawable.auto_awesome) { _ -> openAiSheet() }
+
         val pin = menu.add(R.string.pin, R.drawable.pin) { item -> pin(item) }
         bindPinned(pin)
 
@@ -616,6 +627,114 @@ abstract class NotallyActivity(private val type: Type) : AppCompatActivity() {
         }
         item.setTitle(title)
         item.setIcon(icon)
+    }
+
+    private fun openAiSheet() {
+        val sheet = AiBottomSheet()
+        sheet.show(supportFragmentManager, "AiBottomSheet")
+    }
+
+    // AiBottomSheet.Listener
+    override fun onGenerateFromPrompt(prompt: String) {
+        val system = "You generate note content clearly formatted for a note-taking app."
+        binding.AISummarySection.visibility = View.GONE
+        lifecycleScope.launch {
+            binding.EnterBody.isEnabled = false
+        }
+        aiClient.chatComplete(system, prompt, assistantContent = null, maxTokens = 8192) { result ->
+            runOnUiThread {
+                binding.EnterBody.isEnabled = true
+                result.onSuccess { content ->
+                    model.body = Editable.Factory.getInstance().newEditable(content)
+                    binding.EnterBody.text = model.body
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    override fun onSummarize() {
+        val current = when (type) {
+            Type.NOTE -> model.body.toString()
+            Type.LIST -> Operations.getBody(model.items)
+        }
+        val system = "Summarize the note in concise bullet points."
+        aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
+            runOnUiThread {
+                result.onSuccess { content ->
+                    binding.AISummarySection.visibility = View.VISIBLE
+                    binding.AISummarySection.text = content
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    override fun onEnhance() {
+        val current = when (type) {
+            Type.NOTE -> model.body.toString()
+            Type.LIST -> Operations.getBody(model.items)
+        }
+        val system = "Rewrite the note to improve clarity and style without changing meaning."
+        aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
+            runOnUiThread {
+                result.onSuccess { content ->
+                    model.body = Editable.Factory.getInstance().newEditable(content)
+                    binding.EnterBody.text = model.body
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    override fun onProofread() {
+        val current = when (type) {
+            Type.NOTE -> model.body.toString()
+            Type.LIST -> Operations.getBody(model.items)
+        }
+        val system = "Proofread the note, fixing grammar and spelling without changing tone."
+        aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
+            runOnUiThread {
+                result.onSuccess { content ->
+                    model.body = Editable.Factory.getInstance().newEditable(content)
+                    binding.EnterBody.text = model.body
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    override fun onExtend() {
+        val current = when (type) {
+            Type.NOTE -> model.body.toString()
+            Type.LIST -> Operations.getBody(model.items)
+        }
+        val system = "Extend the note by elaborating key points. Append new content after the original."
+        aiClient.chatComplete(system, current, maxTokens = 8192) { result ->
+            runOnUiThread {
+                result.onSuccess { content ->
+                    val appended = current.trimEnd() + "\n\n" + content.trim()
+                    model.body = Editable.Factory.getInstance().newEditable(appended)
+                    binding.EnterBody.text = model.body
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: getString(R.string.ai_generating), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    override fun isNoteEmpty(): Boolean {
+        val text = when (type) { Type.NOTE -> model.body.toString(); Type.LIST -> Operations.getBody(model.items) }
+        return text.isBlank()
+    }
+
+    override fun noteWordCount(): Int {
+        val text = when (type) { Type.NOTE -> model.body.toString(); Type.LIST -> Operations.getBody(model.items) }
+        return text.trim().split(Regex("\\s+")).filter { it.isNotBlank() }.size
     }
 
     companion object {

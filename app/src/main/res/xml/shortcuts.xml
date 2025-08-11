@@ -9,7 +9,7 @@
         <intent
             android:action="android.intent.action.VIEW"
             android:targetClass="com.omgodse.notally.activities.TakeNote"
-            android:targetPackage="com.omgodse.notally" />
+            android:targetPackage="com.notex.create" />
 
     </shortcut>
 
@@ -21,7 +21,7 @@
         <intent
             android:action="android.intent.action.VIEW"
             android:targetClass="com.omgodse.notally.activities.MakeList"
-            android:targetPackage="com.omgodse.notally" />
+            android:targetPackage="com.notex.create" />
 
     </shortcut>
 

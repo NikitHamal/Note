@@ -311,8 +311,14 @@ private fun Poster(onOpenVoice: () -> Unit) {
                     .nebPressable(scale = 0.94f) { shapeIdx = (shapeIdx + 1) % shapes.size },
                 contentAlignment = Alignment.Center,
             ) {
+                val morphPos by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = shapeIdx.toFloat(),
+                    animationSpec = com.neb.ians.ui.theme.nebSpatialSpec(),
+                    label = "aboutMorphPos",
+                )
                 NebMorphBlob(
-                    polygon = shapes[shapeIdx],
+                    shapes = shapes,
+                    position = morphPos,
                     color = scheme.primaryContainer,
                     modifier = Modifier.fillMaxSize(),
                 )

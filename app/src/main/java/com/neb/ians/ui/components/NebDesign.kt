@@ -45,6 +45,18 @@ import androidx.compose.ui.unit.sp
 import com.neb.ians.util.TactileType
 import com.neb.ians.util.rememberTactileFeedback
 
+
+private const val WEB_BASE = "https://nebians.consica.com.np"
+
+fun resolveMediaUrl(url: String?): String? {
+    if (url.isNullOrBlank()) return null
+    return when {
+        url.startsWith("http://") || url.startsWith("https://") || url.startsWith("file://") || url.startsWith("content://") -> url
+        url.startsWith("/data/") || url.startsWith("/storage/") -> "file://$url"
+        else -> "$WEB_BASE${if (url.startsWith("/")) "" else "/"}$url"
+    }
+}
+
 fun shareText(context: Context, text: String) {
     if (text.isBlank()) return
     val send = Intent(Intent.ACTION_SEND).apply {

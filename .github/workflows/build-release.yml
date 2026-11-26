@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check horizontal scrollers
         run: python3 tools/android/check_scrollers.py
@@ -24,13 +24,13 @@ jobs:
         run: python3 tools/android/check_sheets.py
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           java-version: '17'
           distribution: 'temurin'
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-read-only: false
           cache-cleanup: on-success
@@ -56,9 +56,21 @@ jobs:
         env:
           GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -XX:MaxMetaspaceSize=1g" -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.configuration-cache=true
 
+      - name: Build Modern Release AAB
+        run: ./gradlew bundleModernRelease --build-cache
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseParallelGC -XX:MaxMetaspaceSize=1g" -Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.configuration-cache=true
+
       - name: Upload Modern Release APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Note-modern-release-apk
           path: app/build/outputs/apk/modern/release/*.apk
+          retention-days: 14
+
+      - name: Upload Modern Release AAB
+        uses: actions/upload-artifact@v7
+        with:
+          name: Note-modern-release-aab
+          path: app/build/outputs/bundle/modernRelease/*.aab
           retention-days: 14

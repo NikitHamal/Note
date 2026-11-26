@@ -161,10 +161,90 @@ class RichState(
             else -> d.inheritedMask(p)
         }
         val link = if (oEnd > p) 0 else d.inheritedLink(p)
-        val next = d.splice(p, oEnd, ins, mask, link)
+        var next = d.splice(p, oEnd, ins, mask, link)
+        var caretAfter = (p + ins.length).coerceIn(0, next.text.length)
+        if (!raw && oEnd == p && ins.length == 1 && (ins[0] == '*' || ins[0] == '~' || ins[0] == '`')) {
+            val auto = tryInlineMarkdownAutoFormat(next, caretAfter)
+            if (auto != null) {
+                next = auto.first
+                caretAfter = auto.second
+            }
+        }
         armed = -1
         val sameAsKeyboard = next.text == n
-        commit(next, if (sameAsKeyboard) nv else TextFieldValue(next.text, TextRange((p + ins.length).coerceIn(0, next.text.length))))
+        commit(next, if (sameAsKeyboard) nv else TextFieldValue(next.text, TextRange(caretAfter)))
+    }
+
+    /** When a user finishes typing `**bold**`, `~~strike~~`, `` `code` ``, or `*italic*`, convert to styled span and strip markers. */
+    private fun tryInlineMarkdownAutoFormat(d: RichDoc, caret: Int): Pair<RichDoc, Int>? {
+        val t = d.text
+        if (caret <= 2 || caret > t.length) return null
+        val li = d.lineOf(caret)
+        val ls = d.lineStart(li)
+        val lineSlice = t.substring(ls, caret)
+        return when {
+            lineSlice.endsWith("**") && lineSlice.length >= 5 -> {
+                val openIdx = lineSlice.lastIndexOf("**", lineSlice.length - 3)
+                if (openIdx < 0) null
+                else {
+                    val inner = lineSlice.substring(openIdx + 2, lineSlice.length - 2)
+                    if (inner.isBlank() || inner.startsWith(" ") || inner.endsWith(" ")) null
+                    else {
+                        val absStart = ls + openIdx
+                        val stripped = d.splice(caret - 2, caret, "", 0, 0).splice(absStart, absStart + 2, "", 0, 0)
+                        val m = stripped.masks.copyOf()
+                        for (i in absStart until (absStart + inner.length)) m[i] = m[i] or Fmt.BOLD
+                        stripped.withMasks(m) to (absStart + inner.length)
+                    }
+                }
+            }
+            lineSlice.endsWith("~~") && lineSlice.length >= 5 -> {
+                val openIdx = lineSlice.lastIndexOf("~~", lineSlice.length - 3)
+                if (openIdx < 0) null
+                else {
+                    val inner = lineSlice.substring(openIdx + 2, lineSlice.length - 2)
+                    if (inner.isBlank()) null
+                    else {
+                        val absStart = ls + openIdx
+                        val stripped = d.splice(caret - 2, caret, "", 0, 0).splice(absStart, absStart + 2, "", 0, 0)
+                        val m = stripped.masks.copyOf()
+                        for (i in absStart until (absStart + inner.length)) m[i] = m[i] or Fmt.STRIKE
+                        stripped.withMasks(m) to (absStart + inner.length)
+                    }
+                }
+            }
+            lineSlice.endsWith("`") && !lineSlice.endsWith("``") && lineSlice.length >= 3 -> {
+                val openIdx = lineSlice.lastIndexOf('`', lineSlice.length - 2)
+                if (openIdx < 0 || (openIdx > 0 && lineSlice[openIdx - 1] == '`')) null
+                else {
+                    val inner = lineSlice.substring(openIdx + 1, lineSlice.length - 1)
+                    if (inner.isEmpty()) null
+                    else {
+                        val absStart = ls + openIdx
+                        val stripped = d.splice(caret - 1, caret, "", 0, 0).splice(absStart, absStart + 1, "", 0, 0)
+                        val m = stripped.masks.copyOf()
+                        for (i in absStart until (absStart + inner.length)) m[i] = m[i] or Fmt.CODE
+                        stripped.withMasks(m) to (absStart + inner.length)
+                    }
+                }
+            }
+            lineSlice.endsWith("*") && !lineSlice.endsWith("**") && lineSlice.length >= 3 -> {
+                val openIdx = lineSlice.lastIndexOf('*', lineSlice.length - 2)
+                if (openIdx < 0 || (openIdx > 0 && lineSlice[openIdx - 1] == '*') || (openIdx + 1 < lineSlice.length && lineSlice[openIdx + 1] == '*')) null
+                else {
+                    val inner = lineSlice.substring(openIdx + 1, lineSlice.length - 1)
+                    if (inner.isBlank() || inner.startsWith(" ") || inner.endsWith(" ")) null
+                    else {
+                        val absStart = ls + openIdx
+                        val stripped = d.splice(caret - 1, caret, "", 0, 0).splice(absStart, absStart + 1, "", 0, 0)
+                        val m = stripped.masks.copyOf()
+                        for (i in absStart until (absStart + inner.length)) m[i] = m[i] or Fmt.ITALIC
+                        stripped.withMasks(m) to (absStart + inner.length)
+                    }
+                }
+            }
+            else -> null
+        }
     }
 
     /** Apply an edit without telling the host (used when the host is about to rewrite the text itself). */

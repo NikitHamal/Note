@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -48,7 +49,13 @@ import com.neb.ians.ui.theme.nebFloatLine
 import kotlin.math.roundToInt
 
 /** An extra button in the selection menu (for example Bold in a writing field). */
-class NebToolAction(val label: String, val icon: ImageVector, val onClick: () -> Unit)
+class NebToolAction(
+    val label: String,
+    val icon: ImageVector,
+    val active: Boolean = false,
+    val keepMenuOpen: Boolean = false,
+    val onClick: () -> Unit
+)
 
 /**
  * The app's own menu for selected text: a floating pill above the selection (below it when the top is too close to the
@@ -124,13 +131,20 @@ private fun NebToolbarPopup(state: NebTextToolbarState, m: NebTextToolbarState.M
         with(density) { ToolbarPosition(m.rect, loc[0], loc[1], 10.dp.toPx().roundToInt(), 34.dp.toPx().roundToInt(), 8.dp.toPx().roundToInt()) }
     }
     val c = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(26.dp)
+    val extras = state.extras
+    val hasSelection = m.copy != null || m.cut != null
+    val twoRow = extras.isNotEmpty() && hasSelection
+    val shape = RoundedCornerShape(if (twoRow) 24.dp else 26.dp)
     val enter = remember { Animatable(0f) }
     LaunchedEffect(Unit) { enter.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 700f)) }
-    fun run(block: (() -> Unit)?) = { block?.invoke(); state.hide() }
+    fun run(block: (() -> Unit)?, keepOpen: Boolean = false) = {
+        block?.invoke()
+        if (!keepOpen) state.hide()
+    }
     Popup(popupPositionProvider = provider, properties = PopupProperties(focusable = false, clippingEnabled = false)) {
-        Row(
+        androidx.compose.foundation.layout.Column(
             Modifier
+                .widthIn(max = 336.dp)
                 .graphicsLayer {
                     val k = enter.value
                     alpha = k.coerceIn(0f, 1f)
@@ -141,16 +155,50 @@ private fun NebToolbarPopup(state: NebTextToolbarState, m: NebTextToolbarState.M
                 .background(nebFloatColor())
                 .border(1.dp, nebFloatLine(), shape)
                 .padding(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            m.cut?.let { ToolText("Cut", run(it)) }
-            m.copy?.let { ToolText("Copy", run(it)) }
-            m.paste?.let { ToolText("Paste", run(it)) }
-            m.selectAll?.let { ToolText("Select all", run(it)) }
-            val extras = state.extras
-            if (extras.isNotEmpty()) {
-                Box(Modifier.padding(horizontal = 4.dp).width(1.dp).height(22.dp).background(c.outlineVariant))
-                extras.forEach { a -> ToolIcon(a.icon, a.label, run(a.onClick)) }
+            if (twoRow) {
+                Row(
+                    Modifier
+                        .nebHorizontalScroll( androidx.compose.foundation.rememberScrollState() )
+                        .padding(horizontal = 2.dp, vertical = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp),
+                ) {
+                    extras.forEach { a ->
+                        ToolIcon(a.icon, a.label, a.active, run(a.onClick, a.keepMenuOpen))
+                    }
+                }
+                Box(
+                    Modifier
+                        .padding(vertical = 3.dp, horizontal = 6.dp)
+                        .width(280.dp)
+                        .height(1.dp)
+                        .background(c.outlineVariant.copy(alpha = 0.55f))
+                )
+                Row(
+                    Modifier.nebHorizontalScroll( androidx.compose.foundation.rememberScrollState() ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    m.cut?.let { ToolText("Cut", run(it)) }
+                    m.copy?.let { ToolText("Copy", run(it)) }
+                    m.paste?.let { ToolText("Paste", run(it)) }
+                    m.selectAll?.let { ToolText("Select all", run(it)) }
+                }
+            } else {
+                Row(
+                    Modifier.nebHorizontalScroll( androidx.compose.foundation.rememberScrollState() ),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    m.cut?.let { ToolText("Cut", run(it)) }
+                    m.copy?.let { ToolText("Copy", run(it)) }
+                    m.paste?.let { ToolText("Paste", run(it)) }
+                    m.selectAll?.let { ToolText("Select all", run(it)) }
+                    if (extras.isNotEmpty()) {
+                        Box(Modifier.padding(horizontal = 4.dp).width(1.dp).height(22.dp).background(c.outlineVariant))
+                        extras.forEach { a -> ToolIcon(a.icon, a.label, a.active, run(a.onClick, a.keepMenuOpen)) }
+                    }
+                }
             }
         }
     }
@@ -159,15 +207,27 @@ private fun NebToolbarPopup(state: NebTextToolbarState, m: NebTextToolbarState.M
 @Composable
 private fun ToolText(label: String, onClick: () -> Unit) {
     Box(
-        Modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick).padding(horizontal = 14.dp),
+        Modifier.height(38.dp).clip(RoundedCornerShape(19.dp)).clickable(onClick = onClick).padding(horizontal = 13.dp),
         contentAlignment = Alignment.Center,
     ) { Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1) }
 }
 
 @Composable
-private fun ToolIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun ToolIcon(icon: ImageVector, label: String, active: Boolean = false, onClick: () -> Unit) {
+    val c = MaterialTheme.colorScheme
     Box(
-        Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick),
+        Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (active) c.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, label, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(20.dp)) }
+    ) {
+        Icon(
+            icon,
+            label,
+            tint = if (active) c.onPrimaryContainer else c.onSurface,
+            modifier = Modifier.size(19.dp)
+        )
+    }
 }

@@ -770,6 +770,13 @@ private fun TextBlockRow(
                     }
                 },
                 readOnly = readOnly,
+                enableFormatMenu = type != BlockType.Code,
+                isHeadingActive = type == BlockType.H1 || type == BlockType.H2 || type == BlockType.H3,
+                isQuoteActive = type == BlockType.Quote,
+                isBulletActive = type == BlockType.Bullet,
+                onTurnHeading = { vm.convertLineOrBlock(block.id, state, BlockType.H2) },
+                onTurnQuote = { vm.convertLineOrBlock(block.id, state, BlockType.Quote) },
+                onTurnBullet = { vm.convertLineOrBlock(block.id, state, BlockType.Bullet) },
                 textStyle = style,
                 keyboardCapitalization = if (type == BlockType.Code) KeyboardCapitalization.None else KeyboardCapitalization.Sentences,
                 decorationBox = { inner ->

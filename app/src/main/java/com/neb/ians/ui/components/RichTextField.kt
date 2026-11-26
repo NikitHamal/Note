@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -15,9 +16,16 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.FormatBold
 import androidx.compose.material.icons.outlined.FormatItalic
+import androidx.compose.material.icons.outlined.FormatListBulleted
+import androidx.compose.material.icons.outlined.FormatQuote
+import androidx.compose.material.icons.outlined.FormatStrikethrough
 import androidx.compose.material.icons.outlined.FormatUnderlined
+import androidx.compose.material.icons.outlined.Functions
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Title
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -77,6 +85,7 @@ import kotlin.math.roundToInt
  * pictures sit inside the text as small rounded thumbnails that move with the words around them. Tap a thumbnail to
  * open it, press and hold to drag it elsewhere, tap the cross to take it out.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun RichTextField(
     state: RichState,
@@ -91,6 +100,13 @@ fun RichTextField(
     onChange: ((androidx.compose.ui.text.input.TextFieldValue) -> Unit)? = null,
     keyboardCapitalization: KeyboardCapitalization = KeyboardCapitalization.Sentences,
     readOnly: Boolean = false,
+    enableFormatMenu: Boolean = true,
+    isHeadingActive: Boolean? = null,
+    isQuoteActive: Boolean? = null,
+    isBulletActive: Boolean? = null,
+    onTurnHeading: (() -> Unit)? = null,
+    onTurnQuote: (() -> Unit)? = null,
+    onTurnBullet: (() -> Unit)? = null,
     decorationBox: (@Composable (inner: @Composable () -> Unit) -> Unit)? = null
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -188,14 +204,139 @@ fun RichTextField(
         return if (o.isAttached && from.isAttached) o.localPositionOf(from, at) else null
     }
 
-    // Bold, Italic and Underline sit in the selection menu beside Cut, Copy and Paste
-    val extras = remember(state, enabled, readOnly, decorationBox != null) {
-        if (!enabled || readOnly || decorationBox != null) emptyList()
+    var showLinkDialog by remember { mutableStateOf(false) }
+    var showMathDialog by remember { mutableStateOf(false) }
+
+    // Full M3 Expressive formatting bar in the selection menu (Posts, Notes, Comments)
+    val selSnapshot = state.value.selection
+    val armedSnapshot = state.armed
+    val docSnapshot = state.doc
+    val extras = remember(
+        state, enabled, readOnly, enableFormatMenu,
+        selSnapshot, armedSnapshot, docSnapshot,
+        isHeadingActive, isQuoteActive, isBulletActive
+    ) {
+        if (!enabled || readOnly || !enableFormatMenu) emptyList()
         else listOf(
-            NebToolAction("Bold", Icons.Outlined.FormatBold) { state.toggleInline(Fmt.BOLD) },
-            NebToolAction("Italic", Icons.Outlined.FormatItalic) { state.toggleInline(Fmt.ITALIC) },
-            NebToolAction("Underline", Icons.Outlined.FormatUnderlined) { state.toggleInline(Fmt.UNDERLINE) },
+            NebToolAction("Bold", Icons.Outlined.FormatBold, active = state.isActive(Fmt.BOLD)) { state.toggleInline(Fmt.BOLD) },
+            NebToolAction("Italic", Icons.Outlined.FormatItalic, active = state.isActive(Fmt.ITALIC)) { state.toggleInline(Fmt.ITALIC) },
+            NebToolAction("Underline", Icons.Outlined.FormatUnderlined, active = state.isActive(Fmt.UNDERLINE)) { state.toggleInline(Fmt.UNDERLINE) },
+            NebToolAction("Strikethrough", Icons.Outlined.FormatStrikethrough, active = state.isActive(Fmt.STRIKE)) { state.toggleInline(Fmt.STRIKE) },
+            NebToolAction("Inline code", Icons.Outlined.Code, active = state.isActive(Fmt.CODE)) { state.toggleInline(Fmt.CODE) },
+            NebToolAction("Link", Icons.Outlined.Link, active = false) { showLinkDialog = true },
+            NebToolAction("Heading", Icons.Outlined.Title, active = isHeadingActive ?: state.isLineActive(RLine.H2)) {
+                if (onTurnHeading != null) onTurnHeading() else state.toggleLine(RLine.H2)
+            },
+            NebToolAction("Quote", Icons.Outlined.FormatQuote, active = isQuoteActive ?: state.isLineActive(RLine.QUOTE)) {
+                if (onTurnQuote != null) onTurnQuote() else state.toggleLine(RLine.QUOTE)
+            },
+            NebToolAction("Bullet list", Icons.Outlined.FormatListBulleted, active = isBulletActive ?: state.isLineActive(RLine.BULLET)) {
+                if (onTurnBullet != null) onTurnBullet() else state.toggleLine(RLine.BULLET)
+            },
+            NebToolAction("Formula & symbols", Icons.Outlined.Functions, active = false) { showMathDialog = true },
         )
+    }
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    if (showLinkDialog) {
+        var linkUrl by remember { mutableStateOf("") }
+        NebModalSheet(
+            title = "Add link",
+            showClose = true,
+            onDismiss = { showLinkDialog = false }
+        ) {
+            androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = linkUrl,
+                    onValueChange = { linkUrl = it.replace("\n", "").take(255) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    placeholder = { Text("https://...") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(if (linkUrl.isNotBlank()) scheme.primary else scheme.surfaceContainerHigh)
+                        .clickable(enabled = linkUrl.isNotBlank()) {
+                            state.insertLink(linkUrl)
+                            showLinkDialog = false
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Add link",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = if (linkUrl.isNotBlank()) scheme.onPrimary else scheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    if (showMathDialog) {
+        var formulaText by remember { mutableStateOf("") }
+        val quickSymbols = remember {
+            listOf("²", "³", "√", "π", "±", "×", "÷", "≠", "≤", "≥", "≈", "∞", "→", "⇌", "°", "∴", "∑", "∫", "Δ", "α", "β", "θ", "λ", "Ω")
+        }
+        NebModalSheet(
+            title = "Formula or symbol",
+            showClose = true,
+            onDismiss = { showMathDialog = false }
+        ) {
+            androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = formulaText,
+                    onValueChange = { formulaText = it.take(240) },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    placeholder = { Text("LaTeX or equation (e.g. E = mc^2)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
+                ) {
+                    quickSymbols.forEach { sym ->
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(scheme.secondaryContainer)
+                                .clickable {
+                                    state.insertSymbol(sym)
+                                    showMathDialog = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(sym, style = MaterialTheme.typography.titleSmall, color = scheme.onSecondaryContainer)
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(if (formulaText.isNotBlank()) scheme.primary else scheme.surfaceContainerHigh)
+                        .clickable(enabled = formulaText.isNotBlank()) {
+                            state.insertSymbol("$$${formulaText.trim()}$$")
+                            showMathDialog = false
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Insert formula",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        color = if (formulaText.isNotBlank()) scheme.onPrimary else scheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
     NebTextToolbarProvider(extras) {
     Box(modifier = modifier.bringIntoViewRequester(reveal), propagateMinConstraints = true) {

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!--
+        Base Material3 DayNight theme for NEBians.
+        Compose theming handles most of the visual styling;
+        this XML theme is only needed for the splash/activity window.
+    -->
+    <style name="Theme.NEBians" parent="android:Theme.Material.Light.NoActionBar">
+        <!--
+            The window the system draws before a single Compose frame exists.
+            Without it the platform falls back to its own default and a cold
+            start flashes that colour for a frame or two before our splash
+            appears. Set to the same white the splash paints, so the handover
+            from system window to Compose is invisible.
+        -->
+        <item name="android:windowBackground">@color/neb_splash_background</item>
+
+        <!-- Transparent system bars for modern edge-to-edge -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:enforceStatusBarContrast" tools:targetApi="q">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
+    </style>
+</resources>

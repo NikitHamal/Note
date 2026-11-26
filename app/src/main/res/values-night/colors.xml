@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark: the page colour of the app's dark theme (md_theme_dark_surface), so the system window,
+         the system splash and the Compose splash are one surface with no seam. -->
+    <color name="neb_splash_background">#FF17181D</color>
+</resources>

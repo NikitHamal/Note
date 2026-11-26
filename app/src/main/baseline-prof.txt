@@ -1,0 +1,46 @@
+# The code a student runs in the first minutes (launch, sign-in, Home and the other feeds, their
+# cards, and the data layer behind them), compiled ahead of time when the app is installed rather
+# than interpreted until the phone's idle-time compiler gets to it. The Compose and other library
+# profiles are merged in by the build; androidx.profileinstaller applies them all to APKs
+# installed outside the Play Store too.
+HSPLcom/neb/ians/MainActivity**->**(**)**
+HSPLcom/neb/ians/NEBiansApp**->**(**)**
+HSPLcom/neb/ians/DaggerNEBiansApp**->**(**)**
+HSPLcom/neb/ians/Hilt_**->**(**)**
+HSPLcom/neb/ians/AppFeatures**->**(**)**
+HSPLcom/neb/ians/di/**->**(**)**
+HSPLcom/neb/ians/data/**->**(**)**
+HSPLcom/neb/ians/util/**->**(**)**
+HSPLcom/neb/ians/ui/NavigationKt**->**(**)**
+HSPLcom/neb/ians/ui/components/**->**(**)**
+HSPLcom/neb/ians/ui/theme/**->**(**)**
+HSPLcom/neb/ians/ui/pixel/**->**(**)**
+HSPLcom/neb/ians/ui/screens/auth/**->**(**)**
+HSPLcom/neb/ians/ui/screens/home/**->**(**)**
+HSPLcom/neb/ians/ui/screens/forum/**->**(**)**
+HSPLcom/neb/ians/ui/screens/library/**->**(**)**
+HSPLcom/neb/ians/ui/screens/resource/**->**(**)**
+HSPLcom/neb/ians/ui/screens/news/**->**(**)**
+HSPLcom/neb/ians/ui/screens/notifications/**->**(**)**
+HSPLcom/neb/ians/ui/screens/profile/**->**(**)**
+HSPLcom/neb/ians/ui/screens/people/**->**(**)**
+HSPLcom/neb/ians/ui/screens/search/**->**(**)**
+# Notes list and editor, the writing field with pictures in it, the selection menu and the crash screen
+# (the paths a student runs right after Home) plus the screens that were missing from the first list.
+HSPLcom/neb/ians/ui/screens/notes/**->**(**)**
+HSPLcom/neb/ians/ui/crash/**->**(**)**
+HSPLcom/neb/ians/ui/screens/settings/**->**(**)**
+HSPLcom/neb/ians/ui/screens/bookmarks/**->**(**)**
+HSPLcom/neb/ians/ui/screens/downloads/**->**(**)**
+HSPLcom/neb/ians/ui/screens/reader/**->**(**)**
+HSPLcom/neb/ians/ui/screens/onboarding/**->**(**)**
+HSPLcom/neb/ians/ui/screens/upload/**->**(**)**
+# Pathways (Match ranking, exams, colleges, route pages), the school directory and the institution page,
+# added after the portfolio and Pathways work made them part of the first-week path.
+HSPLcom/neb/ians/ui/screens/pathways/**->**(**)**
+HSPLcom/neb/ians/ui/screens/institutions/**->**(**)**
+HSPLcom/neb/ians/speech/**->**(**)**
+HSPLcom/neb/ians/ui/screens/results/**->**(**)**
+HSPLcom/neb/ians/ui/screens/tools/**->**(**)**
+HSPLcom/neb/ians/ui/screens/interactive/**->**(**)**
+HSPLcom/neb/ians/ui/sim/**->**(**)**

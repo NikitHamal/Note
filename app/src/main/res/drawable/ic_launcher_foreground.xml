@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M3 Expressive Note Logo: Geometric folded note page + N monogram + AI voice dictation bars -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:translateX="232"
+        android:translateY="212"
+        android:scaleX="0.546"
+        android:scaleY="0.546">
+
+        <!-- Back folded note page sheet (deep navy #052566) -->
+        <path
+            android:fillColor="#052566"
+            android:pathData="M216,72 L704,72 L888,256 L888,896 C888,940 852,976 808,976 L216,976 C172,976 136,940 136,896 L136,152 C136,108 172,72 216,72 Z" />
+
+        <!-- Top-right architectural folded corner facet (sky facet #a8c5ff) -->
+        <path
+            android:fillColor="#a8c5ff"
+            android:pathData="M704,72 L888,256 L744,256 C722,256 704,238 704,216 Z" />
+
+        <!-- Inner fold shadow facet (#07337f) -->
+        <path
+            android:fillColor="#07337f"
+            android:pathData="M704,216 L888,256 L888,348 L672,272 Z" />
+
+        <!-- Primary M3X Note + N front ribbon (#0058df) -->
+        <path
+            android:fillColor="#0058df"
+            android:pathData="M248,216 L372,216 L632,612 L632,324 L760,324 L760,832 L636,832 L376,436 L376,832 L248,832 Z" />
+
+        <!-- Diagonal highlight facet on the N bridge (#a8c5ff) -->
+        <path
+            android:fillColor="#a8c5ff"
+            android:pathData="M372,216 L456,216 L632,486 L632,612 Z" />
+
+        <!-- AI Voice Dictation acoustic pulse bars integrated on the right note margin (#dbe4ff) -->
+        <path
+            android:fillColor="#dbe4ff"
+            android:pathData="M804,432 L840,432 C851,432 860,441 860,452 L860,604 C860,615 851,624 840,624 L804,624 C793,624 784,615 784,604 L784,452 C784,441 793,432 804,432 Z" />
+    </group>
+</vector>

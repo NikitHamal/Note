@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:scaleX="0.61"
+        android:scaleY="0.61"
+        android:translateX="210"
+        android:translateY="86">
+        <!-- Path 1 (Back vertical segment) -->
+        <path
+            android:pathData="M518.7,78.5 L519.6,165.0 L849.8,383.6 L851.6,1236.4 L930.7,1173.2 L930.7,347.3 Z"
+            android:fillColor="#FFFFFF" />
+        <!-- Path 2 (Middle segment) -->
+        <path
+            android:pathData="M454.6,212.8 L454.6,297.4 L687.1,450.9 L687.1,778.2 L764.3,859.1 L765.2,414.6 Z"
+            android:fillColor="#FFFFFF" />
+        <!-- Path 3 (Light diagonal segment) -->
+        <path
+            android:pathData="M316.8,330.6 L317.7,383.6 L602.3,689.6 L602.3,484.1 Z"
+            android:fillColor="#FFFFFF" />
+        <!-- Path 4 (Front main segment) -->
+        <path
+            android:pathData="M78.6,277.3 L78.6,1118.0 L275.7,1317.1 L279.4,820.4 L751.9,1323.6 L751.9,890.2 L673.8,809.3 L668.2,904.1 Z"
+            android:fillColor="#FFFFFF" />
+    </group>
+</vector>

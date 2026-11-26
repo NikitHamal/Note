@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        API 31+ draws its own splash screen from the launch theme before the
+        activity exists, and there is no opting out of it. Make it plain: the
+        same white the Compose splash paints, and no icon, so the first thing
+        anyone sees move is the mark assembling rather than a launcher icon
+        that vanishes and is then rebuilt.
+    -->
+    <style name="Theme.NEBians" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/neb_splash_background</item>
+        <item name="android:windowSplashScreenBackground">@color/neb_splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
+    </style>
+</resources>

@@ -569,6 +569,15 @@ private fun ReadBar(vm: NoteEditorViewModel) {
     val c = MaterialTheme.colorScheme
     val state by vm.readState.collectAsStateWithLifecycle()
     val progress by vm.readProgress.collectAsStateWithLifecycle()
+    val speed by vm.readSpeed.collectAsStateWithLifecycle()
+    val speedLabel = when (speed) {
+        1.0f -> "1x"
+        1.25f -> "1.25x"
+        1.5f -> "1.5x"
+        2.0f -> "2x"
+        0.75f -> "0.75x"
+        else -> "${speed}x"
+    }
     Surface(
         shape = RoundedCornerShape(30.dp), color = noteSurfaceTileColor(), contentColor = c.onSurface,
         tonalElevation = 0.dp, shadowElevation = 0.dp,
@@ -592,6 +601,15 @@ private fun ReadBar(vm: NoteEditorViewModel) {
                     if (state is ReadState.Loading) "Loading voice" else p?.text.orEmpty(),
                     style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                )
+                NoteLabelTile(
+                    label = speedLabel,
+                    onClick = vm::cycleReadSpeed,
+                    shape = RoundedCornerShape(16.dp),
+                    height = 32.dp,
+                    size = 11,
+                    container = noteRaisedTileColor(),
+                    selected = speed != 1.0f,
                 )
                 IconButton(onClick = vm::readPrevious) { Icon(Icons.Outlined.SkipPrevious, "Previous") }
                 Surface(

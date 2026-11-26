@@ -274,7 +274,7 @@ class WhistleEngine @Inject constructor(
         if (!supported || !models.isAnySttInstalled() || samples.isEmpty()) return@withContext ""
         idleJob?.cancel()
         val effectiveLang = resolveEffectiveLang()
-        val keywords = "NEB\nSEE\nIOE\nCEE\nMECEE\nCTEVT\nKathmandu\nPokhara\nLalitpur\nBhaktapur\nTribhuvan"
+        val keywords = "@batch\nNEB\nSEE\nIOE\nCEE\nMECEE\nCTEVT\nKathmandu\nPokhara\nLalitpur\nBhaktapur\nTribhuvan"
         ensureLoaded()
         val out = StringBuilder()
         val rate = 16_000

@@ -120,8 +120,8 @@ internal fun NoteFolderSheet(
                                 { onDismiss(); onMoveToFolder(folder) },
                                 Modifier.weight(1f).height(56.dp),
                                 shape = shape,
-                                container = if (active) c.inverseSurface else noteRaisedTileColor(),
-                                content = if (active) c.inverseOnSurface else c.onSurface,
+                                container = if (active) c.primary else noteRaisedTileColor(),
+                                content = if (active) c.onPrimary else c.onSurface,
                             ) {
                                 Row(Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     Icon(if (active) Icons.Outlined.Check else Icons.Outlined.Folder, null, Modifier.size(20.dp))

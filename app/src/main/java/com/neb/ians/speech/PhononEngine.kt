@@ -58,6 +58,8 @@ class PhononEngine @Inject constructor(
     val state: StateFlow<ReadState> = _state.asStateFlow()
     private val _progress = MutableStateFlow<ReadProgress?>(null)
     val progress: StateFlow<ReadProgress?> = _progress.asStateFlow()
+    private val _speed = MutableStateFlow(1.0f)
+    val speed: StateFlow<Float> = _speed.asStateFlow()
 
     @Volatile private var run: Run? = null
     @Volatile private var track: AudioTrack? = null
@@ -138,8 +140,27 @@ class PhononEngine @Inject constructor(
             isPlaying = isPlaying,
             positionMs = p.index * 1000L,
             durationMs = p.total * 1000L,
-            speed = 1f,
+            speed = _speed.value,
         )
+    }
+
+    fun cycleSpeed() {
+        val next = when (_speed.value) {
+            1.0f -> 1.25f
+            1.25f -> 1.5f
+            1.5f -> 2.0f
+            2.0f -> 0.75f
+            else -> 1.0f
+        }
+        _speed.value = next
+        if (models.activeTtsModel() == SpeechModelId.Phonon) {
+            runCatching {
+                track?.takeIf { it.playState == AudioTrack.PLAYSTATE_PLAYING }?.let { t ->
+                    t.playbackParams = android.media.PlaybackParams().setSpeed(next)
+                }
+            }
+        }
+        updatePlaybackNotification(_state.value == ReadState.Speaking)
     }
 
     fun pause() {
@@ -248,11 +269,15 @@ class PhononEngine @Inject constructor(
                 val sink = object : PcmSink {
                     override fun onPcm(pcm: FloatArray): Boolean = !r.cancelled && r.jump < 0 && writeAll(t, pcm, r, counter)
                 }
+                val curSpeed = _speed.value.coerceIn(0.5f, 2.0f)
                 val ok = if (useVoca) {
                     val vName = (r.voice ?: models.vocaVoice.value).uppercase()
                     val vId = if (vName == "M2") 1 else 0
-                    NativeSpeech.vocaSpeak(vocaHandle, r.segments[i], vId, 1.0f, sink)
+                    NativeSpeech.vocaSpeak(vocaHandle, r.segments[i], vId, curSpeed, sink)
                 } else {
+                    if (curSpeed != 1.0f) {
+                        runCatching { t.playbackParams = android.media.PlaybackParams().setSpeed(curSpeed) }
+                    }
                     NativeSpeech.ttsSpeak(phononHandle, r.segments[i], sink)
                 }
                 if (r.cancelled) break

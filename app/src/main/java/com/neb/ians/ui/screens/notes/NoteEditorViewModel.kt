@@ -88,6 +88,7 @@ class NoteEditorViewModel @Inject constructor(
     val seconds: StateFlow<Int> = whistle.seconds
     val readState: StateFlow<ReadState> = phonon.state
     val readProgress: StateFlow<ReadProgress?> = phonon.progress
+    val readSpeed: StateFlow<Float> = phonon.speed
 
     private val undoStack = ArrayDeque<List<NoteBlock>>()
     private val redoStack = ArrayDeque<List<NoteBlock>>()
@@ -967,17 +968,33 @@ class NoteEditorViewModel @Inject constructor(
     fun stopDictation() = whistle.stop()
     fun clearDictationError() = whistle.clearError()
 
+    private fun normalizeSpokenDictation(raw: String): String {
+        var s = raw.trim()
+        if (s.isEmpty()) return s
+        s = s.replace("पूर्ण विराम", "।")
+            .replace("पूर्णविराम", "।")
+            .replace("अल्प विराम", ",")
+            .replace("अल्पविराम", ",")
+            .replace("प्रश्न चिन्ह", "?")
+            .replace("प्रश्नचिन्ह", "?")
+            .replace(Regex("\\s+([।,?!])"), "$1")
+        return s
+    }
+
     /** Dictated words go to the end of the block the caret was last in (or the last text block). */
-    private fun insertDictated(text: String) {
+    private fun insertDictated(rawText: String) {
+        val text = normalizeSpokenDictation(rawText)
+        if (text.isEmpty()) return
         val list = _blocks.value
         val i = focusedId?.let { indexOf(it) }?.takeIf { it >= 0 && list[it].type.hasText }
             ?: list.indexOfLast { it.type.hasText }
         if (i < 0) {
-            insert(BlockType.Text, null, NoteBlock(text = text.trim()))
+            insert(BlockType.Text, null, NoteBlock(text = text))
             return
         }
         val cur = list[i]
-        val lead = if (cur.text.isNotEmpty() && !cur.text.last().isWhitespace()) " " else ""
+        val startsWithPunct = text.first() in "।,?!.;:"
+        val lead = if (cur.text.isNotEmpty() && !cur.text.last().isWhitespace() && !startsWithPunct) " " else ""
         val out = list.toMutableList()
         out[i] = cur.copy(text = cur.text + lead + text)
         commit(out, force = false)
@@ -1003,6 +1020,7 @@ class NoteEditorViewModel @Inject constructor(
     fun readNext() = phonon.next()
     fun readPrevious() = phonon.previous()
     fun readStop() = phonon.stop()
+    fun cycleReadSpeed() = phonon.cycleSpeed()
     fun clearReadError() = phonon.clearError()
 
     override fun onCleared() {

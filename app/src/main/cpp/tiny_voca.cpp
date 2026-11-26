@@ -550,7 +550,50 @@ std::vector<float> normalizeOp(const std::vector<float>& x, int count, const Lay
     return y;
 }
 
-// High-accuracy vectorized ARM NEON GELU using Abramowitz & Stegun 7.1.26 erf approximation (< 1.5e-7 max error)
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+// Custom 4-wide ARM NEON Cephes minimax exp(x) kernel (< 1.5 ULP across [-87, 88], ARMv7 & ARM64)
+inline float32x4_t vexpq_f32_fast(float32x4_t x) {
+    const float32x4_t vMax = vdupq_n_f32(88.0f);
+    const float32x4_t vMin = vdupq_n_f32(-87.0f);
+    const float32x4_t vLog2e = vdupq_n_f32(1.4426950408889634f);
+    const float32x4_t vLn2Hi = vdupq_n_f32(0.693359375f);
+    const float32x4_t vLn2Lo = vdupq_n_f32(-2.12194440e-4f);
+    const float32x4_t vHalf = vdupq_n_f32(0.5f);
+    const float32x4_t vOne = vdupq_n_f32(1.0f);
+    const float32x4_t vZero = vdupq_n_f32(0.0f);
+    const float32x4_t vC1 = vdupq_n_f32(1.9875691500e-4f);
+    const float32x4_t vC2 = vdupq_n_f32(1.3981999507e-3f);
+    const float32x4_t vC3 = vdupq_n_f32(8.3334519073e-3f);
+    const float32x4_t vC4 = vdupq_n_f32(4.1665795894e-2f);
+    const float32x4_t vC5 = vdupq_n_f32(1.6666665459e-1f);
+    const float32x4_t vC6 = vdupq_n_f32(5.0000001201e-1f);
+
+    x = vmaxq_f32(vMin, vminq_f32(vMax, x));
+    float32x4_t fx = vmlaq_f32(vHalf, x, vLog2e);
+    int32x4_t ni = vcvtq_s32_f32(fx);
+    float32x4_t fn = vcvtq_f32_s32(ni);
+    uint32x4_t gtMask = vcgtq_f32(fn, fx);
+    fn = vsubq_f32(fn, vbslq_f32(gtMask, vOne, vZero));
+    ni = vcvtq_s32_f32(fn);
+
+    float32x4_t r = vmlsq_f32(x, fn, vLn2Hi);
+    r = vmlsq_f32(r, fn, vLn2Lo);
+    float32x4_t r2 = vmulq_f32(r, r);
+
+    float32x4_t y = vmlaq_f32(vC2, vC1, r);
+    y = vmlaq_f32(vC3, y, r);
+    y = vmlaq_f32(vC4, y, r);
+    y = vmlaq_f32(vC5, y, r);
+    y = vmlaq_f32(vC6, y, r);
+    y = vmlaq_f32(r, y, r2);
+    y = vaddq_f32(y, vOne);
+
+    int32x4_t pow2n = vshlq_n_s32(vaddq_s32(ni, vdupq_n_s32(127)), 23);
+    return vmulq_f32(y, vreinterpretq_f32_s32(pow2n));
+}
+#endif
+
+// High-accuracy 100% in-register vectorized ARM NEON GELU using Abramowitz & Stegun 7.1.26 erf + vexpq_f32_fast
 void geluInPlace(std::vector<float>* x) {
     float* ptr = x->data();
     const size_t n = x->size();
@@ -584,11 +627,8 @@ void geluInPlace(std::vector<float>* x) {
         poly = vmlaq_f32(vA2, poly, t);
         poly = vmlaq_f32(vA1, poly, t);
         poly = vmulq_f32(poly, t);
-        // Fast 4-term exp(-az^2) via (1 - az^2 / 16)^16 or exact scalar lane expf:
-        float z2[4];
-        vst1q_f32(z2, vnegq_f32(vmulq_f32(az, az)));
-        float e4[4] = { std::expf(z2[0]), std::expf(z2[1]), std::expf(z2[2]), std::expf(z2[3]) };
-        float32x4_t erfAbs = vsubq_f32(vOne, vmulq_f32(poly, vld1q_f32(e4)));
+        float32x4_t expNegZ2 = vexpq_f32_fast(vnegq_f32(vmulq_f32(az, az)));
+        float32x4_t erfAbs = vsubq_f32(vOne, vmulq_f32(poly, expNegZ2));
         uint32x4_t negMask = vcltq_f32(z, vZero);
         float32x4_t erfSigned = vbslq_f32(negMask, vnegq_f32(erfAbs), erfAbs);
         vst1q_f32(ptr + i, vmulq_f32(vmulq_f32(v, vHalf), vaddq_f32(vOne, erfSigned)));
@@ -649,80 +689,136 @@ std::vector<float> depthwiseOp(const std::vector<float>& x, int count, const Lay
     return y;
 }
 
-std::vector<float> attentionOp(const std::vector<float>& x, int count, const TransformerBlock& blk, int heads, const std::vector<float>& turn) {
+const std::vector<float>& getPrecomputedRope48() {
+    static const std::vector<float> table = []() {
+        constexpr int kW = 48;
+        float inv_freq[kW / 2];
+        for (int i = 0; i < kW; i += 2) {
+            inv_freq[i >> 1] = 1.0f / std::pow(10000.0f, static_cast<float>(i) / static_cast<float>(kW));
+        }
+        std::vector<float> turn(static_cast<size_t>(kMaxFrames) * kW);
+        for (int t = 0; t < kMaxFrames; ++t) {
+            for (int i = 0; i < kW; i += 2) {
+                float ang = static_cast<float>(t) * inv_freq[i >> 1];
+                turn[static_cast<size_t>(t) * kW + i] = std::cos(ang);
+                turn[static_cast<size_t>(t) * kW + i + 1] = std::sin(ang);
+            }
+        }
+        return turn;
+    }();
+    return table;
+}
+
+std::vector<float> attentionOp(const std::vector<float>& x, int count, const TransformerBlock& blk, int heads, const float* turn) {
     const int ch = blk.out.out_dim, width = ch / heads;
     std::vector<float> qkv = linearOp(x.data(), count, blk.qkv);
     std::vector<float> mixed(static_cast<size_t>(count) * ch, 0.0f);
     const float scale = 1.0f / std::sqrt(static_cast<float>(width));
-    std::vector<float> queries(static_cast<size_t>(count) * width);
-    std::vector<float> keys(static_cast<size_t>(count) * width);
-    std::vector<float> share(static_cast<size_t>(count) * count);
-    for (int h = 0; h < heads; ++h) {
-        for (int t = 0; t < count; ++t) {
-            const int q = t * 3 * ch + h * width, k = q + ch, row = t * width;
-            for (int i = 0; i < width; i += 2) {
-                float cs = turn[row + i], sn = turn[row + i + 1];
-                queries[row + i] = qkv[q + i] * cs - qkv[q + i + 1] * sn;
-                queries[row + i + 1] = qkv[q + i] * sn + qkv[q + i + 1] * cs;
-                keys[row + i] = qkv[k + i] * cs - qkv[k + i + 1] * sn;
-                keys[row + i + 1] = qkv[k + i] * sn + qkv[k + i + 1] * cs;
+
+    auto runHeadRange = [&](int hStart, int hEnd) {
+        std::vector<float> queries(static_cast<size_t>(count) * width);
+        std::vector<float> keys(static_cast<size_t>(count) * width);
+        std::vector<float> row(static_cast<size_t>(count));
+        for (int h = hStart; h < hEnd; ++h) {
+            for (int t = 0; t < count; ++t) {
+                const int q = t * 3 * ch + h * width, k = q + ch, rOff = t * width;
+                for (int i = 0; i < width; i += 2) {
+                    float cs = turn[rOff + i], sn = turn[rOff + i + 1];
+                    queries[rOff + i] = qkv[q + i] * cs - qkv[q + i + 1] * sn;
+                    queries[rOff + i + 1] = qkv[q + i] * sn + qkv[q + i + 1] * cs;
+                    keys[rOff + i] = qkv[k + i] * cs - qkv[k + i + 1] * sn;
+                    keys[rOff + i + 1] = qkv[k + i] * sn + qkv[k + i + 1] * cs;
+                }
             }
-        }
-        for (int t = 0; t < count; ++t) {
-            float top = -1e30f;
-            const float* qt = queries.data() + static_cast<size_t>(t) * width;
-            for (int j = 0; j < count; ++j) {
-                float s = dotProduct(qt, keys.data() + static_cast<size_t>(j) * width, width);
-                share[t * count + j] = s;
-                if (s > top) top = s;
-            }
-            float total = 0.0f;
-            for (int j = 0; j < count; ++j) {
-                float e = std::exp((share[t * count + j] - top) * scale);
-                share[t * count + j] = e;
-                total += e;
-            }
-            float inv_total = 1.0f / total;
-            float* dst = mixed.data() + t * ch + h * width;
-            for (int j = 0; j < count; ++j) {
-                float w = share[t * count + j] * inv_total;
-                const float* vr = qkv.data() + j * 3 * ch + 2 * ch + h * width;
-                int i = 0;
+            for (int t = 0; t < count; ++t) {
+                float top = -1e30f;
+                const float* qt = queries.data() + static_cast<size_t>(t) * width;
+                for (int j = 0; j < count; ++j) {
+                    float s = dotProduct(qt, keys.data() + static_cast<size_t>(j) * width, width);
+                    row[j] = s;
+                    if (s > top) top = s;
+                }
+                float total = 0.0f;
+                int j = 0;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-                float32x4_t wv = vdupq_n_f32(w);
-                for (; i + 16 <= width; i += 16) {
-                    vst1q_f32(dst + i, vmlaq_f32(vld1q_f32(dst + i), vld1q_f32(vr + i), wv));
-                    vst1q_f32(dst + i + 4, vmlaq_f32(vld1q_f32(dst + i + 4), vld1q_f32(vr + i + 4), wv));
-                    vst1q_f32(dst + i + 8, vmlaq_f32(vld1q_f32(dst + i + 8), vld1q_f32(vr + i + 8), wv));
-                    vst1q_f32(dst + i + 12, vmlaq_f32(vld1q_f32(dst + i + 12), vld1q_f32(vr + i + 12), wv));
+                float32x4_t vTop = vdupq_n_f32(top);
+                float32x4_t vScale = vdupq_n_f32(scale);
+                float32x4_t vTot = vdupq_n_f32(0.0f);
+                for (; j + 4 <= count; j += 4) {
+                    float32x4_t vs = vld1q_f32(row.data() + j);
+                    float32x4_t ve = vexpq_f32_fast(vmulq_f32(vsubq_f32(vs, vTop), vScale));
+                    vst1q_f32(row.data() + j, ve);
+                    vTot = vaddq_f32(vTot, ve);
                 }
-                for (; i + 4 <= width; i += 4) {
-                    vst1q_f32(dst + i, vmlaq_f32(vld1q_f32(dst + i), vld1q_f32(vr + i), wv));
-                }
+#if defined(__aarch64__)
+                total = vaddvq_f32(vTot);
+#else
+                float32x2_t p = vadd_f32(vget_low_f32(vTot), vget_high_f32(vTot));
+                total = vget_lane_f32(vpadd_f32(p, p), 0);
 #endif
-                for (; i < width; ++i) dst[i] += w * vr[i];
+#endif
+                for (; j < count; ++j) {
+                    float e = std::exp((row[j] - top) * scale);
+                    row[j] = e;
+                    total += e;
+                }
+                float inv_total = 1.0f / total;
+                float* dst = mixed.data() + static_cast<size_t>(t) * ch + h * width;
+                for (int k = 0; k < count; ++k) {
+                    float w = row[k] * inv_total;
+                    const float* vr = qkv.data() + static_cast<size_t>(k) * 3 * ch + 2 * ch + h * width;
+                    int i = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+                    float32x4_t wv = vdupq_n_f32(w);
+                    for (; i + 16 <= width; i += 16) {
+                        vst1q_f32(dst + i, vmlaq_f32(vld1q_f32(dst + i), vld1q_f32(vr + i), wv));
+                        vst1q_f32(dst + i + 4, vmlaq_f32(vld1q_f32(dst + i + 4), vld1q_f32(vr + i + 4), wv));
+                        vst1q_f32(dst + i + 8, vmlaq_f32(vld1q_f32(dst + i + 8), vld1q_f32(vr + i + 8), wv));
+                        vst1q_f32(dst + i + 12, vmlaq_f32(vld1q_f32(dst + i + 12), vld1q_f32(vr + i + 12), wv));
+                    }
+                    for (; i + 4 <= width; i += 4) {
+                        vst1q_f32(dst + i, vmlaq_f32(vld1q_f32(dst + i), vld1q_f32(vr + i), wv));
+                    }
+#endif
+                    for (; i < width; ++i) dst[i] += w * vr[i];
+                }
             }
         }
+    };
+
+    if (count >= 64 && heads == 4) {
+        std::thread worker(runHeadRange, 0, 2);
+        runHeadRange(2, 4);
+        worker.join();
+    } else {
+        runHeadRange(0, heads);
     }
     return linearOp(mixed.data(), count, blk.out);
 }
 
 std::vector<float> transformerOp(std::vector<float> x, int count, const TransformerStack& stack, int heads) {
     const int width = stack.norm.out_dim / heads;
-    std::vector<float> inv_freq(width / 2);
-    for (int i = 0; i < width; i += 2) {
-        inv_freq[i >> 1] = 1.0f / std::pow(10000.0f, static_cast<float>(i) / static_cast<float>(width));
-    }
-    std::vector<float> turn(static_cast<size_t>(count) * width);
-    for (int t = 0; t < count; ++t) {
+    std::vector<float> fallback_turn;
+    const float* turn_ptr = nullptr;
+    if (width == 48 && count <= kMaxFrames) {
+        turn_ptr = getPrecomputedRope48().data();
+    } else {
+        std::vector<float> inv_freq(width / 2);
         for (int i = 0; i < width; i += 2) {
-            float ang = static_cast<float>(t) * inv_freq[i >> 1];
-            turn[t * width + i] = std::cos(ang);
-            turn[t * width + i + 1] = std::sin(ang);
+            inv_freq[i >> 1] = 1.0f / std::pow(10000.0f, static_cast<float>(i) / static_cast<float>(width));
         }
+        fallback_turn.resize(static_cast<size_t>(count) * width);
+        for (int t = 0; t < count; ++t) {
+            for (int i = 0; i < width; i += 2) {
+                float ang = static_cast<float>(t) * inv_freq[i >> 1];
+                fallback_turn[t * width + i] = std::cos(ang);
+                fallback_turn[t * width + i + 1] = std::sin(ang);
+            }
+        }
+        turn_ptr = fallback_turn.data();
     }
     for (const auto& blk : stack.blocks) {
-        auto attn = attentionOp(normalizeOp(x, count, blk.norm1), count, blk, heads, turn);
+        auto attn = attentionOp(normalizeOp(x, count, blk.norm1), count, blk, heads, turn_ptr);
         for (size_t i = 0; i < x.size(); ++i) x[i] += attn[i];
         auto near = depthwiseOp(normalizeOp(x, count, blk.norm2), count, blk.depthwise);
         auto expd = linearOp(near.data(), count, blk.expand);
@@ -822,20 +918,43 @@ std::vector<float> filteredSource(const std::vector<float>& source, int size, in
     std::vector<float> sum(static_cast<size_t>(frames) * hop + size, 0.0f);
     std::vector<float> weight(sum.size(), 0.0f);
     const int src_len = static_cast<int>(source.size());
+    std::vector<float> gains(half + 4);
     for (int f = 0; f < frames; ++f) {
         int first = f * hop - half;
-        for (int n = 0; n < size; ++n) {
-            int at = first + n;
-            re[n] = (at >= 0 && at < src_len) ? source[at] * plan.window[n] : 0.0f;
-            im[n] = 0.0f;
+        std::memset(im.data(), 0, static_cast<size_t>(size) * sizeof(float));
+        if (first >= 0 && first + size <= src_len) {
+            const float* sp = source.data() + first;
+            const float* wp = plan.window.data();
+            int n = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+            for (; n + 8 <= size; n += 8) {
+                vst1q_f32(re.data() + n, vmulq_f32(vld1q_f32(sp + n), vld1q_f32(wp + n)));
+                vst1q_f32(re.data() + n + 4, vmulq_f32(vld1q_f32(sp + n + 4), vld1q_f32(wp + n + 4)));
+            }
+#endif
+            for (; n < size; ++n) re[n] = sp[n] * wp[n];
+        } else {
+            for (int n = 0; n < size; ++n) {
+                int at = first + n;
+                re[n] = (at >= 0 && at < src_len) ? source[at] * plan.window[n] : 0.0f;
+            }
         }
         plan.run(re.data(), im.data());
-        std::fill(cr.begin(), cr.end(), 0.0f);
-        std::fill(ci.begin(), ci.end(), 0.0f);
+        std::memset(cr.data(), 0, static_cast<size_t>(size) * sizeof(float));
+        std::memset(ci.data(), 0, static_cast<size_t>(size) * sizeof(float));
         cepstrum_fn(f, cr);
         plan.run(cr.data(), ci.data());
+        int gk = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+        const float32x4_t vMinG = vdupq_n_f32(-14.0f), vMaxG = vdupq_n_f32(6.0f);
+        for (; gk + 4 <= half + 1; gk += 4) {
+            float32x4_t vc = vmaxq_f32(vMinG, vminq_f32(vMaxG, vld1q_f32(cr.data() + gk)));
+            vst1q_f32(gains.data() + gk, vexpq_f32_fast(vc));
+        }
+#endif
+        for (; gk <= half; ++gk) gains[gk] = std::exp(std::clamp(cr[gk], -14.0f, 6.0f));
         for (int k = 0; k <= half; ++k) {
-            float gain = std::exp(std::clamp(cr[k], -14.0f, 6.0f));
+            float gain = gains[k];
             float cs = gain * std::cos(ci[k]), sn = gain * std::sin(ci[k]);
             float a = re[k], b = im[k];
             re[k] = a * cs - b * sn;
@@ -843,10 +962,22 @@ std::vector<float> filteredSource(const std::vector<float>& source, int size, in
             if (k > 0 && k < half) { re[size - k] = re[k]; im[size - k] = -im[k]; }
         }
         plan.run(re.data(), im.data());
-        size_t base = static_cast<size_t>(f) * hop;
-        for (int n = 0; n < size; ++n) {
-            sum[base + n] += re[n] * plan.window_norm[n];
-            weight[base + n] += plan.window_sq[n];
+        float* sum_p = sum.data() + static_cast<size_t>(f) * hop;
+        float* wgt_p = weight.data() + static_cast<size_t>(f) * hop;
+        const float* wn = plan.window_norm.data();
+        const float* wsq = plan.window_sq.data();
+        int n = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+        for (; n + 8 <= size; n += 8) {
+            vst1q_f32(sum_p + n, vmlaq_f32(vld1q_f32(sum_p + n), vld1q_f32(re.data() + n), vld1q_f32(wn + n)));
+            vst1q_f32(sum_p + n + 4, vmlaq_f32(vld1q_f32(sum_p + n + 4), vld1q_f32(re.data() + n + 4), vld1q_f32(wn + n + 4)));
+            vst1q_f32(wgt_p + n, vaddq_f32(vld1q_f32(wgt_p + n), vld1q_f32(wsq + n)));
+            vst1q_f32(wgt_p + n + 4, vaddq_f32(vld1q_f32(wgt_p + n + 4), vld1q_f32(wsq + n + 4)));
+        }
+#endif
+        for (; n < size; ++n) {
+            sum_p[n] += re[n] * wn[n];
+            wgt_p[n] += wsq[n];
         }
     }
     std::vector<float> out(source.size());
@@ -1060,8 +1191,26 @@ std::vector<PhoneUnit> phonemizeDevanagariWord(const std::vector<int>& cps) {
     for (size_t i = 0; i < cps.size(); ++i) {
         int cp = cps[i];
         int next = (i + 1 < cps.size()) ? cps[i + 1] : -1;
-        if (cp == 0x0901 || cp == 0x0902) { out.push_back({34, 0}); continue; } // ँ / ं -> ŋ
+        int next2 = (i + 2 < cps.size()) ? cps[i + 2] : -1;
+        if (cp == 0x0901 || cp == 0x0902) {
+            // Contextual Nepali nasal assimilation: labial (m=32) before प..म, dental (n=33) before त..न/च..झ, else velar (ŋ=34)
+            uint8_t nasal = 34;
+            if (next >= 0x092A && next <= 0x092E) nasal = 32;
+            else if ((next >= 0x091A && next <= 0x0928)) nasal = 33;
+            out.push_back({nasal, 0});
+            continue;
+        }
         if (cp == 0x0903) { out.push_back({31, 0}); continue; } // ः -> h
+        // Nepali conjunct ज्ञ (ज + ् + ञ -> gya: ɡ + j) and क्ष (क + ् + ष -> chhya / ksha)
+        if (cp == 0x091C && next == 0x094D && next2 == 0x091E) {
+            out.push_back({22, 0});
+            out.push_back({37, 0});
+            i += 2;
+            int afterConj = (i + 1 < cps.size()) ? cps[i + 1] : -1;
+            if (afterConj == 0x094D) { ++i; continue; }
+            if (afterConj >= 0x093E && afterConj <= 0x094C) { cp = 0x092F; next = afterConj; }
+            else { pushVowel(43); continue; }
+        }
         if (cp >= 0x0904 && cp <= 0x0914) {
             switch (cp) {
                 case 0x0905: pushVowel(52); break; // अ -> ʌ

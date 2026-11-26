@@ -142,12 +142,38 @@ int conditionPcmNeon(const float* src, int n, std::vector<float>& dst, bool trim
 #endif
         for (; j < n; ++j) out[j] *= gain;
     }
-    if (!trimSilence || n < 8000) return n;
+    if (!trimSilence || n < 4000) return n;
     const float silThresh = 0.0025f;
     int firstVoice = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    float32x4_t vSil = vdupq_n_f32(silThresh);
+    while (firstVoice + 16 <= n) {
+        uint32x4_t m0 = vcgeq_f32(vabsq_f32(vld1q_f32(out + firstVoice)), vSil);
+        uint32x4_t m1 = vcgeq_f32(vabsq_f32(vld1q_f32(out + firstVoice + 4)), vSil);
+        uint32x4_t m2 = vcgeq_f32(vabsq_f32(vld1q_f32(out + firstVoice + 8)), vSil);
+        uint32x4_t m3 = vcgeq_f32(vabsq_f32(vld1q_f32(out + firstVoice + 12)), vSil);
+        uint32x4_t any = vorrq_u32(vorrq_u32(m0, m1), vorrq_u32(m2, m3));
+        uint32x2_t any2 = vorr_u32(vget_low_u32(any), vget_high_u32(any));
+        if (vget_lane_u32(vpmax_u32(any2, any2), 0) != 0) break;
+        firstVoice += 16;
+    }
+#endif
     while (firstVoice < n && std::fabs(out[firstVoice]) < silThresh) ++firstVoice;
     if (firstVoice >= n) return 0;
     int lastVoice = n - 1;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    while (lastVoice - 16 >= firstVoice) {
+        int base = lastVoice - 15;
+        uint32x4_t m0 = vcgeq_f32(vabsq_f32(vld1q_f32(out + base)), vSil);
+        uint32x4_t m1 = vcgeq_f32(vabsq_f32(vld1q_f32(out + base + 4)), vSil);
+        uint32x4_t m2 = vcgeq_f32(vabsq_f32(vld1q_f32(out + base + 8)), vSil);
+        uint32x4_t m3 = vcgeq_f32(vabsq_f32(vld1q_f32(out + base + 12)), vSil);
+        uint32x4_t any = vorrq_u32(vorrq_u32(m0, m1), vorrq_u32(m2, m3));
+        uint32x2_t any2 = vorr_u32(vget_low_u32(any), vget_high_u32(any));
+        if (vget_lane_u32(vpmax_u32(any2, any2), 0) != 0) break;
+        lastVoice -= 16;
+    }
+#endif
     while (lastVoice > firstVoice && std::fabs(out[lastVoice]) < silThresh) --lastVoice;
     int start = std::max(0, firstVoice - 1920);
     int end = std::min(n, lastVoice + 2400);
@@ -238,7 +264,12 @@ jstring JNICALL nativeSttStream(
     if (pcm == nullptr || samples <= 0) return nullptr;
     enableFlushToZero();
     std::string l = toStd(env, lang), k = toStd(env, keywords);
-    const bool useSinglePassBatch = gStreamFresh && samples >= 24000;
+    bool explicitBatch = false;
+    if (k.rfind("@batch\n", 0) == 0) {
+        explicitBatch = true;
+        k.erase(0, 7);
+    }
+    const bool useSinglePassBatch = explicitBatch || (gStreamFresh && samples >= 64000);
     int condSamples = 0;
     jfloat* crit = static_cast<jfloat*>(env->GetPrimitiveArrayCritical(pcm, nullptr));
     if (crit != nullptr) {

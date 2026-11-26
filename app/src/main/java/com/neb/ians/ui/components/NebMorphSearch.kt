@@ -7,12 +7,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,7 +40,6 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -46,7 +47,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
@@ -67,6 +67,7 @@ import kotlin.math.roundToInt
  * - Auto-collapses back to the icon button with dot indicator when focus/IME leaves and [hasResults] is true.
  * - If [query] is non-blank and [hasResults] is false (0 matches), stays expanded above the empty results state.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NebMorphTitleSearch(
     title: String,
@@ -93,43 +94,51 @@ fun NebMorphTitleSearch(
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val requester = remember { FocusRequester() }
-    var hadFocus by remember { mutableStateOf(false) }
+    var isFocused by remember { mutableStateOf(false) }
+    var hasFocusedSinceOpen by remember { mutableStateOf(false) }
     var openedAtMs by remember { mutableLongStateOf(0L) }
     var requestFocusOnOpen by remember { mutableStateOf(openInitially) }
+    var clearingQuery by remember { mutableStateOf(false) }
+    var trailingRestWidthPx by remember { mutableIntStateOf(0) }
 
-    val density = LocalDensity.current
-    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    val imeVisible = WindowInsets.isImeVisible
     var wasImeVisible by remember { mutableStateOf(false) }
 
-    // If the user dismissed the soft keyboard (via system back/chevron or IME search),
-    // auto-collapse when results exist; stay open if 0 results.
+    LaunchedEffect(query) {
+        if (query.isEmpty()) {
+            clearingQuery = false
+        }
+    }
+
+    // When the soft keyboard is dismissed (back gesture / keyboard hide arrow), release focus and
+    // auto-collapse when results exist; stay expanded if 0 results match.
     LaunchedEffect(imeVisible) {
         if (imeVisible) {
             wasImeVisible = true
         } else if (wasImeVisible) {
             wasImeVisible = false
-            val elapsed = android.os.SystemClock.uptimeMillis() - openedAtMs
-            if (expanded && elapsed > 320L) {
+            if (expanded) {
+                hasFocusedSinceOpen = true
                 focus.clearFocus()
-                if (!isSearching && (hasResults || query.isBlank())) {
+                if (!isSearching && (hasResults || query.isBlank() || clearingQuery)) {
                     expanded = false
                 }
             }
         }
     }
 
-    // When async search completes or filter changes:
-    // - If 0 results for a non-blank query, keep/make the search bar expanded so it never disappears on empty results.
-    // - If focus already left while waiting for async search and results arrived, auto-collapse to show the dot indicator.
-    LaunchedEffect(hasResults, isSearching, query) {
-        if (query.isNotBlank() && !isSearching && !hasResults) {
+    // Reactive state sync for async searches & filter changes:
+    // - If 0 results match a non-blank query, keep/make the search bar expanded so it never disappears.
+    // - Once search finishes after focus/IME has left, auto-collapse to show the dot indicator when results exist.
+    LaunchedEffect(isFocused, hasFocusedSinceOpen, hasResults, isSearching, query, clearingQuery) {
+        if (query.isNotBlank() && !clearingQuery && !isSearching && !hasResults) {
             if (!expanded) {
                 requestFocusOnOpen = false
+                hasFocusedSinceOpen = true
                 expanded = true
             }
-        } else if (!isSearching && hasResults && expanded && !hadFocus && !imeVisible) {
-            val elapsed = android.os.SystemClock.uptimeMillis() - openedAtMs
-            if (elapsed > 350L) {
+        } else if (expanded && hasFocusedSinceOpen && !isFocused && !imeVisible && !isSearching) {
+            if (hasResults || query.isBlank() || clearingQuery) {
                 expanded = false
             }
         }
@@ -141,7 +150,9 @@ fun NebMorphTitleSearch(
             if (prog.value < 0.08f) prog.snapTo(0.08f)
             prog.animateTo(1f, spring(dampingRatio = 0.84f, stiffness = 400f))
         } else {
-            hadFocus = false
+            isFocused = false
+            hasFocusedSinceOpen = false
+            requestFocusOnOpen = false
             prog.animateTo(0f, spring(dampingRatio = 0.88f, stiffness = 480f))
         }
     }
@@ -152,19 +163,25 @@ fun NebMorphTitleSearch(
                 withFrameNanos { }
                 runCatching { requester.requestFocus() }
                 withFrameNanos { }
-                if (!hadFocus) runCatching { requester.requestFocus() }
+                if (!isFocused) runCatching { requester.requestFocus() }
                 keyboard?.show()
             }
         } else {
             keyboard?.hide()
         }
     }
-    BackHandler(enabled = expanded) {
-        if (query.isNotBlank() && !hasResults) {
+    BackHandler(enabled = expanded || query.isNotBlank()) {
+        if (expanded) {
+            if (query.isNotBlank() && !hasResults) {
+                clearingQuery = true
+                onQueryChange("")
+            }
+            focus.clearFocus()
+            expanded = false
+        } else {
+            clearingQuery = true
             onQueryChange("")
         }
-        focus.clearFocus()
-        expanded = false
     }
 
     val showField by remember { derivedStateOf { expanded || prog.value > 0.02f } }
@@ -220,9 +237,11 @@ fun NebMorphTitleSearch(
                         indication = null,
                     ) {
                         openedAtMs = android.os.SystemClock.uptimeMillis()
+                        clearingQuery = false
                         requestFocusOnOpen = true
                         if (!expanded) {
-                            hadFocus = false
+                            isFocused = false
+                            hasFocusedSinceOpen = false
                             expanded = true
                         } else {
                             runCatching { requester.requestFocus() }
@@ -251,7 +270,10 @@ fun NebMorphTitleSearch(
                         ) {
                             BasicTextField(
                                 value = query,
-                                onValueChange = onQueryChange,
+                                onValueChange = {
+                                    clearingQuery = false
+                                    onQueryChange(it)
+                                },
                                 singleLine = true,
                                 enabled = expanded,
                                 modifier = Modifier
@@ -259,21 +281,23 @@ fun NebMorphTitleSearch(
                                     .focusRequester(requester)
                                     .onFocusChanged {
                                         if (it.isFocused) {
-                                            hadFocus = true
+                                            isFocused = true
+                                            hasFocusedSinceOpen = true
+                                            requestFocusOnOpen = false
                                             if (!expanded) {
                                                 openedAtMs = android.os.SystemClock.uptimeMillis()
-                                                requestFocusOnOpen = true
                                                 expanded = true
                                             }
-                                        } else if (hadFocus && expanded) {
+                                        } else if (isFocused && expanded) {
                                             val elapsed = android.os.SystemClock.uptimeMillis() - openedAtMs
-                                            if (elapsed > 320L) {
-                                                hadFocus = false
-                                                if (!isSearching && (hasResults || query.isBlank())) {
+                                            if (requestFocusOnOpen && elapsed <= 260L) {
+                                                runCatching { requester.requestFocus() }
+                                            } else {
+                                                isFocused = false
+                                                hasFocusedSinceOpen = true
+                                                if (!isSearching && (hasResults || query.isBlank() || clearingQuery)) {
                                                     expanded = false
                                                 }
-                                            } else if (requestFocusOnOpen) {
-                                                runCatching { requester.requestFocus() }
                                             }
                                         }
                                     },
@@ -281,9 +305,12 @@ fun NebMorphTitleSearch(
                                 cursorBrush = SolidColor(c.primary),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(onSearch = {
+                                    hasFocusedSinceOpen = true
+                                    requestFocusOnOpen = false
+                                    isFocused = false
                                     focus.clearFocus()
                                     keyboard?.hide()
-                                    if (!isSearching && (hasResults || query.isBlank())) {
+                                    if (!isSearching && (hasResults || query.isBlank() || clearingQuery)) {
                                         expanded = false
                                     }
                                 }),
@@ -306,8 +333,9 @@ fun NebMorphTitleSearch(
                                     .clip(RoundedCornerShape(17.dp))
                                     .clickable {
                                         openedAtMs = android.os.SystemClock.uptimeMillis()
+                                        clearingQuery = true
                                         onQueryChange("")
-                                        if (hadFocus || imeVisible) {
+                                        if (isFocused || imeVisible) {
                                             requestFocusOnOpen = true
                                             runCatching { requester.requestFocus() }
                                             keyboard?.show()
@@ -321,7 +349,7 @@ fun NebMorphTitleSearch(
                         }
                     }
                 }
-                if (query.isNotBlank()) {
+                if (query.isNotBlank() && !clearingQuery) {
                     Box(
                         Modifier
                             .align(Alignment.TopEnd)
@@ -335,34 +363,29 @@ fun NebMorphTitleSearch(
             }
         }
         if (trailingTools != null) {
-            val showTrailing by remember { derivedStateOf { !expanded && prog.value < 0.85f } }
-            Box(
-                Modifier
-                    .clipToBounds()
-                    .layout { m, cons ->
-                        val p = prog.value.coerceIn(0f, 1f)
-                        if (p >= 0.85f) {
-                            layout(0, 0) {}
-                        } else {
-                            val pl = m.measure(cons.copy(minWidth = 0))
-                            val w = (pl.width * (1f - p)).roundToInt().coerceAtLeast(0)
-                            layout(w, pl.height) {
-                                if (w > 0) {
-                                    pl.place(0, 0)
-                                }
-                            }
+            val composeTrailing by remember { derivedStateOf { !expanded && prog.value < 0.08f } }
+            if (composeTrailing) {
+                Box(
+                    Modifier.layout { m, cons ->
+                        val pl = m.measure(cons.copy(minWidth = 0))
+                        if (pl.width > 0) trailingRestWidthPx = pl.width
+                        layout(pl.width, pl.height) {
+                            pl.place(0, 0)
                         }
                     }
-                    .graphicsLayer {
-                        val p = prog.value
-                        alpha = (1f - p * 1.8f).coerceIn(0f, 1f)
-                        scaleX = 1f - p * 0.12f
-                        scaleY = 1f - p * 0.12f
-                    },
-            ) {
-                if (showTrailing) {
+                ) {
                     trailingTools()
                 }
+            } else {
+                // While expanded or animating, trailingTools is completely removed from composition so it can
+                // never intercept taps on the Clear (X) icon, while preserving smooth width interpolation.
+                Box(
+                    Modifier.layout { _, cons ->
+                        val p = prog.value.coerceIn(0f, 1f)
+                        val w = (trailingRestWidthPx * (1f - p)).roundToInt().coerceAtLeast(0)
+                        layout(w, cons.minHeight) {}
+                    }
+                )
             }
         }
     }

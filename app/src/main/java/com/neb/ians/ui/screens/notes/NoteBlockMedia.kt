@@ -291,12 +291,12 @@ internal fun ToolChip(
 ) {
     val c = MaterialTheme.colorScheme
     Row(
-        Modifier.height(36.dp).clip(shape).background(if (on) c.inverseSurface else c.surfaceContainerHigh)
+        Modifier.height(36.dp).clip(shape).background(if (on) c.primary else c.surfaceContainerHigh)
             .clickable(onClick = onClick).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (icon != null) Icon(icon, null, tint = if (on) c.inverseOnSurface else c.onSurfaceVariant, modifier = Modifier.size(16.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = if (on) c.inverseOnSurface else c.onSurfaceVariant)
+        if (icon != null) Icon(icon, null, tint = if (on) c.onPrimary else c.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Text(label, style = MaterialTheme.typography.labelLarge, color = if (on) c.onPrimary else c.onSurfaceVariant)
     }
 }
 
@@ -310,9 +310,9 @@ internal fun ToolIcon(
 ) {
     val c = MaterialTheme.colorScheme
     Box(
-        Modifier.size(36.dp).clip(shape).background(if (on) c.inverseSurface else c.surfaceContainerHigh).clickable(onClick = onClick),
+        Modifier.size(36.dp).clip(shape).background(if (on) c.primary else c.surfaceContainerHigh).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { Icon(icon, label, tint = if (on) c.inverseOnSurface else c.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+    ) { Icon(icon, label, tint = if (on) c.onPrimary else c.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
 }
 
 // ---------------------------------------------------------------------------------------------------- audio
@@ -592,12 +592,12 @@ fun AudioBlockView(block: NoteBlock, vm: NoteEditorViewModel, readOnly: Boolean,
                     },
                     Modifier.height(36.dp),
                     shape = joinEnd(18.dp, JoinEdge),
-                    container = if (showTranscript) c.inverseSurface else tileBg,
-                    content = if (showTranscript) c.inverseOnSurface else c.onSurface,
+                    container = if (showTranscript) c.primary else tileBg,
+                    content = if (showTranscript) c.onPrimary else c.onSurface,
                 ) {
                     Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (transcribing) {
-                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = if (showTranscript) c.inverseOnSurface else c.primary)
+                            CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = if (showTranscript) c.onPrimary else c.primary)
                         } else {
                             Icon(Icons.AutoMirrored.Outlined.Subject, null, Modifier.size(16.dp))
                         }

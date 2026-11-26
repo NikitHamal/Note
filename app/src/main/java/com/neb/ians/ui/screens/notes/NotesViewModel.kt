@@ -55,6 +55,8 @@ class NotesViewModel @Inject constructor(
 ) : ViewModel() {
     private val prefs by lazy { context.getSharedPreferences("neb_notes", Context.MODE_PRIVATE) }
     private val controls = MutableStateFlow(Controls())
+    private val _query = MutableStateFlow("")
+    val queryFlow: StateFlow<String> = _query
 
     val ui: StateFlow<NotesUi> = combine(repo.notes, controls) { all, c ->
         val live = all.filter { !it.isTrashed }
@@ -95,8 +97,14 @@ class NotesViewModel @Inject constructor(
         }
     }
 
-    fun setQuery(q: String) = controls.update { it.copy(query = q) }
-    fun setSearching(on: Boolean) = controls.update { it.copy(searching = on, query = if (on) it.query else "") }
+    fun setQuery(q: String) {
+        _query.value = q
+        controls.update { it.copy(query = q) }
+    }
+    fun setSearching(on: Boolean) {
+        if (!on) _query.value = ""
+        controls.update { it.copy(searching = on, query = if (on) it.query else "") }
+    }
     fun setFilter(f: NoteFilter) = controls.update { it.copy(filter = f, selection = emptySet()) }
     fun setTag(t: String?) = controls.update { it.copy(tag = if (it.tag == t) null else t) }
 

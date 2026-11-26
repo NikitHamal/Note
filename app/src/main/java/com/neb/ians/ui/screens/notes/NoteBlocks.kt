@@ -349,7 +349,7 @@ object NoteDoc {
                 BlockType.Code -> "```\n${b.text}\n```"
                 BlockType.Divider -> "---"
                 BlockType.Image -> "[image]"
-                BlockType.Audio -> "[audio recording]"
+                BlockType.Audio -> if (b.caption.isNotBlank()) b.caption else "[audio recording]"
                 BlockType.Drawing -> "[drawing]"
                 BlockType.Table -> tableMarkdown(b.rows)
             }

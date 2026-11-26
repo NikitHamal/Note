@@ -136,8 +136,8 @@ internal fun NoteLabelTile(
     val c = MaterialTheme.colorScheme
     NoteTile(
         onClick, modifier.height(height), shape,
-        container = if (selected) c.inverseSurface else container,
-        content = if (selected) c.inverseOnSurface else c.onSurface,
+        container = if (selected) c.primary else container,
+        content = if (selected) c.onPrimary else c.onSurface,
     ) {
         Row(
             Modifier.padding(horizontal = 6.dp),

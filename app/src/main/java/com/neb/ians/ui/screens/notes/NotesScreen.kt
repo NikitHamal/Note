@@ -365,14 +365,15 @@ private fun Header(
     onToggleTheme: (() -> Unit)? = null,
 ) {
     var sortMenu by remember { mutableStateOf(false) }
+    val query by vm.queryFlow.collectAsStateWithLifecycle()
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val toolCount = if (onToggleTheme != null) 5 else 4
     com.neb.ians.ui.components.NebMorphTitleSearch(
         title = "Note",
-        query = ui.query,
+        query = query,
         onQueryChange = vm::setQuery,
         placeholder = "Search notes",
-        hasResults = !ui.loaded || ui.notes.isNotEmpty() || ui.query.isBlank(),
+        hasResults = !ui.loaded || ui.notes.isNotEmpty() || query.isBlank(),
         modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 14.dp, top = 8.dp, bottom = 6.dp),
         trailingTools = {
             Row(

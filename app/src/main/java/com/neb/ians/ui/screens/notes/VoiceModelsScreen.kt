@@ -61,8 +61,59 @@ fun VoiceModelsScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item { LocalAiStatusRow(vm) }
             item { SttModelCard(vm, inSettings = true) }
             item { TtsModelCard(vm, inSettings = true) }
+        }
+    }
+}
+
+@Composable
+private fun LocalAiStatusRow(vm: SpeechViewModel) {
+    val shruti by vm.shruti.collectAsStateWithLifecycle()
+    val whistle by vm.whistleModel.collectAsStateWithLifecycle()
+    val voca by vm.tinyVoca.collectAsStateWithLifecycle()
+    val phonon by vm.phononModel.collectAsStateWithLifecycle()
+    val states = listOf(shruti, whistle, voca, phonon)
+    val installedCount = states.count { it is ModelState.Installed }
+    val installedBytes = states.sumOf { (it as? ModelState.Installed)?.bytes ?: 0L }
+    val c = MaterialTheme.colorScheme
+    val cells = listOf(
+        "Kernel" to if (vm.phononSupported) "NEON + FP16" else "ARM NEON",
+        "Models" to "$installedCount of 4 ready",
+        "Storage" to if (installedBytes > 0L) formatBytes(installedBytes) else "0 KB",
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        cells.forEachIndexed { idx, (label, value) ->
+            NoteTile(
+                onClick = null,
+                modifier = Modifier.weight(1f),
+                shape = rowItemShape(idx, cells.size, outer = 22.dp, inner = JoinEdge),
+                container = noteSurfaceTileColor(),
+                content = c.onSurface,
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = c.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                    Text(
+                        value,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (idx == 0) c.primary else c.onSurface,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
     }
 }

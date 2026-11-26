@@ -31,6 +31,7 @@ int inflateEnd(z_stream_s* strm);
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -619,18 +620,30 @@ std::vector<float> convolveOp(const std::vector<float>& x, int count, const Laye
     return y;
 }
 
+// Contiguous channel-vectorized ARM NEON depthwise convolution (weights pre-transposed to [taps, ch])
 std::vector<float> depthwiseOp(const std::vector<float>& x, int count, const Layer& l) {
     const int ch = l.out_dim, taps = l.taps, reach = taps >> 1;
     std::vector<float> y(static_cast<size_t>(count) * ch);
     for (int t = 0; t < count; ++t) {
         int first = std::max(0, reach - t), end = std::min(taps, count + reach - t);
-        for (int c = 0; c < ch; ++c) {
-            float sum = l.bias[c];
-            const float* wr = l.weight + static_cast<size_t>(c) * taps;
-            for (int k = first; k < end; ++k) {
-                sum += wr[k] * x[static_cast<size_t>(t + k - reach) * ch + c];
+        float* yr = y.data() + static_cast<size_t>(t) * ch;
+        std::memcpy(yr, l.bias, static_cast<size_t>(ch) * sizeof(float));
+        for (int k = first; k < end; ++k) {
+            const float* wk = l.weight + static_cast<size_t>(k) * ch;
+            const float* xk = x.data() + static_cast<size_t>(t + k - reach) * ch;
+            int c = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+            for (; c + 16 <= ch; c += 16) {
+                vst1q_f32(yr + c, vmlaq_f32(vld1q_f32(yr + c), vld1q_f32(wk + c), vld1q_f32(xk + c)));
+                vst1q_f32(yr + c + 4, vmlaq_f32(vld1q_f32(yr + c + 4), vld1q_f32(wk + c + 4), vld1q_f32(xk + c + 4)));
+                vst1q_f32(yr + c + 8, vmlaq_f32(vld1q_f32(yr + c + 8), vld1q_f32(wk + c + 8), vld1q_f32(xk + c + 8)));
+                vst1q_f32(yr + c + 12, vmlaq_f32(vld1q_f32(yr + c + 12), vld1q_f32(wk + c + 12), vld1q_f32(xk + c + 12)));
             }
-            y[static_cast<size_t>(t) * ch + c] = sum;
+            for (; c + 4 <= ch; c += 4) {
+                vst1q_f32(yr + c, vmlaq_f32(vld1q_f32(yr + c), vld1q_f32(wk + c), vld1q_f32(xk + c)));
+            }
+#endif
+            for (; c < ch; ++c) yr[c] += wk[c] * xk[c];
         }
     }
     return y;
@@ -1322,6 +1335,28 @@ std::vector<float> synthesizeUtterance(const VocaModel& m, const std::vector<int
     auto acoustic = transformerOp(std::move(pproj), frames, m.acoustic_stack, kHeads);
 
     const int samples = frames * kHop;
+    std::vector<float> noise_part;
+    auto computeNoise = [&]() {
+        auto g = linearOp(acoustic.data(), frames, m.voc_noise);
+        const int gw = m.voc_noise.out_dim, g_steps = kHop / kNoiseHop;
+        noise_part = filteredSource(
+            gaussianNoiseSource(static_cast<size_t>(samples), 0),
+            kNoiseFft, kNoiseHop, g_steps * frames + 3,
+            [&](int f, std::vector<float>& cep) {
+                int sub = std::min(f, g_steps * frames - 1);
+                int here = sub / g_steps;
+                for (int i = 0; i < kNoiseCep; ++i) cep[i] = static_cast<float>(g[here * gw + i] * lifterCoeff(i));
+                cep[0] += g[here * gw + kNoiseCep + (sub % g_steps)];
+            }
+        );
+    };
+    std::thread noiseThread;
+    if (frames >= 24) {
+        noiseThread = std::thread(computeNoise);
+    } else {
+        computeNoise();
+    }
+
     auto h = linearOp(acoustic.data(), frames, m.voc_harm);
     const int hw = m.voc_harm.out_dim, h_steps = kHop / kSynthHop;
     auto voiced = filteredSource(
@@ -1340,19 +1375,7 @@ std::vector<float> synthesizeUtterance(const VocaModel& m, const std::vector<int
             cep[0] += h[here * hw + kCepCausal + kCepAnti + (sub % h_steps)];
         }
     );
-
-    auto g = linearOp(acoustic.data(), frames, m.voc_noise);
-    const int gw = m.voc_noise.out_dim, g_steps = kHop / kNoiseHop;
-    auto noise_part = filteredSource(
-        gaussianNoiseSource(static_cast<size_t>(samples), 0),
-        kNoiseFft, kNoiseHop, g_steps * frames + 3,
-        [&](int f, std::vector<float>& cep) {
-            int sub = std::min(f, g_steps * frames - 1);
-            int here = sub / g_steps;
-            for (int i = 0; i < kNoiseCep; ++i) cep[i] = static_cast<float>(g[here * gw + i] * lifterCoeff(i));
-            cep[0] += g[here * gw + kNoiseCep + (sub % g_steps)];
-        }
-    );
+    if (noiseThread.joinable()) noiseThread.join();
 
     float peak = 0.0f;
     for (int i = 0; i < samples; ++i) {
@@ -1470,6 +1493,17 @@ VocaModel* voca_load(const char* gguf_path, std::string* err_out) {
                         float* dst = tr.data() + (static_cast<size_t>(o) * tp + k) * id;
                         const float* src = t.data.data() + static_cast<size_t>(o) * id * tp + k;
                         for (int i = 0; i < id; ++i) dst[i] = src[static_cast<size_t>(i) * tp];
+                    }
+                }
+                t.data = std::move(tr);
+            } else if (tm.shape.size() == 3 && tm.shape[1] == 1 && tm.shape[2] > 1) {
+                // Transpose depthwise [ch, 1, taps] -> [taps, ch] for 16-wide contiguous ARM NEON depthwiseOp
+                const int ch = tm.shape[0], tp = tm.shape[2];
+                std::vector<float> tr(t.data.size());
+                for (int k = 0; k < tp; ++k) {
+                    float* dst = tr.data() + static_cast<size_t>(k) * ch;
+                    for (int c = 0; c < ch; ++c) {
+                        dst[c] = t.data[static_cast<size_t>(c) * tp + k];
                     }
                 }
                 t.data = std::move(tr);

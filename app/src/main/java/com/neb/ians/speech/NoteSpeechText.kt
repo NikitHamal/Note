@@ -13,8 +13,8 @@ object NoteSpeechText {
     private val tag = Regex("(?<![\\w&])#(\\w+)")
     private val quotePrefix = Regex("^\\s*>+\\s?")
     private val multiSpace = Regex("\\s+")
-    private val sentenceEnd = Regex("(?<=[.!?;:\\u0964\\u0965])\\s+")
-    private const val MAX = 280
+    private val sentenceEnd = Regex("(?<=[.!?;:])\\s+|(?<=[\\u0964\\u0965])\\s*")
+    private const val MAX = 180
 
     fun segments(title: String, body: String): List<String> {
         val out = ArrayList<String>()
@@ -54,10 +54,11 @@ object NoteSpeechText {
     private fun finish(s: String) = if (s.isEmpty() || s.last() in ".!?\u0964\u0965") s else "$s."
 
     private fun split(line: String): List<String> {
-        if (line.length <= MAX) return listOf(line)
+        val sentences = line.split(sentenceEnd).map { it.trim() }.filter { it.isNotEmpty() }
+        if (sentences.size <= 1 && line.length <= MAX) return listOf(line)
         val parts = ArrayList<String>()
         val cur = StringBuilder()
-        for (sentence in line.split(sentenceEnd)) {
+        for (sentence in sentences) {
             if (cur.isNotEmpty() && cur.length + sentence.length + 1 > MAX) { parts += cur.toString(); cur.clear() }
             if (sentence.length > MAX) {
                 var rest = sentence

@@ -28,9 +28,13 @@ int inflateInit2_(z_stream_s* strm, int windowBits, const char* version, int str
 int inflate(z_stream_s* strm, int flush);
 int inflateEnd(z_stream_s* strm);
 }
+#include <atomic>
 #include <cctype>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <functional>
+#include <mutex>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -41,6 +45,89 @@ int inflateEnd(z_stream_s* strm);
 
 namespace neb_voca {
 namespace {
+
+inline void enableVocaFtz() {
+#if defined(__aarch64__)
+    uint64_t fpcr = 0;
+    __asm__ __volatile__("mrs %0, fpcr" : "=r"(fpcr));
+    if ((fpcr & (1ULL << 24)) == 0) {
+        fpcr |= (1ULL << 24);
+        __asm__ __volatile__("msr fpcr, %0" : : "r"(fpcr));
+    }
+#elif defined(__arm__) && defined(__VFP_FP__) && !defined(__SOFTFP__)
+    uint32_t fpscr = 0;
+    __asm__ __volatile__("vmrs %0, fpscr" : "=r"(fpscr));
+    if ((fpscr & (1U << 24)) == 0) {
+        fpscr |= (1U << 24);
+        __asm__ __volatile__("vmsr fpscr, %0" : : "r"(fpscr));
+    }
+#endif
+}
+
+struct PersistentWorker {
+    std::mutex mtx;
+    std::condition_variable cv_work;
+    std::condition_variable cv_done;
+    std::function<void()> task;
+    bool has_work = false;
+    bool stop = false;
+    std::thread worker;
+
+    PersistentWorker() {
+        worker = std::thread([this]() {
+            enableVocaFtz();
+            std::unique_lock<std::mutex> lk(mtx);
+            while (!stop) {
+                cv_work.wait(lk, [this]() { return has_work || stop; });
+                if (stop) break;
+                auto fn = std::move(task);
+                lk.unlock();
+                if (fn) fn();
+                lk.lock();
+                has_work = false;
+                cv_done.notify_one();
+            }
+        });
+    }
+
+    ~PersistentWorker() {
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            stop = true;
+        }
+        cv_work.notify_one();
+        if (worker.joinable()) worker.join();
+    }
+
+    std::atomic<bool> in_flight{false};
+
+    template <typename F0, typename F1>
+    void run2(F0&& fn0, F1&& fn1) {
+        bool expected = false;
+        if (!in_flight.compare_exchange_strong(expected, true)) {
+            fn0();
+            fn1();
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            task = std::forward<F0>(fn0);
+            has_work = true;
+        }
+        cv_work.notify_one();
+        fn1();
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            cv_done.wait(lk, [this]() { return !has_work; });
+        }
+        in_flight.store(false);
+    }
+};
+
+PersistentWorker& getWorker() {
+    static PersistentWorker w;
+    return w;
+}
 
 constexpr int kSampleRate = 24000;
 constexpr int kHop = 256;
@@ -159,7 +246,20 @@ void unpackTensor(const uint8_t* ptr, uint32_t type, size_t count, std::vector<f
             float scale = halfToFloat(h);
             const int8_t* qs = reinterpret_cast<const int8_t*>(bp + 2);
             float* bd = dst + (b << 5);
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+            float32x4_t vScale = vdupq_n_f32(scale);
+            for (int half = 0; half < 32; half += 16) {
+                int8x16_t q8 = vld1q_s8(qs + half);
+                int16x8_t q16_lo = vmovl_s8(vget_low_s8(q8));
+                int16x8_t q16_hi = vmovl_s8(vget_high_s8(q8));
+                vst1q_f32(bd + half, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(q16_lo))), vScale));
+                vst1q_f32(bd + half + 4, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(q16_lo))), vScale));
+                vst1q_f32(bd + half + 8, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(q16_hi))), vScale));
+                vst1q_f32(bd + half + 12, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(q16_hi))), vScale));
+            }
+#else
             for (int j = 0; j < 32; ++j) bd[j] = scale * static_cast<float>(qs[j]);
+#endif
         }
         for (size_t i = blocks << 5; i < count; ++i) {
             size_t blk = (i >> 5) * 34;
@@ -175,11 +275,29 @@ void unpackTensor(const uint8_t* ptr, uint32_t type, size_t count, std::vector<f
             std::memcpy(&h, bp, 2);
             float scale = halfToFloat(h);
             float* bd = dst + (b << 5);
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+            float32x4_t vScale = vdupq_n_f32(scale);
+            uint8x16_t packed = vld1q_u8(bp + 2);
+            int8x16_t vEight = vdupq_n_s8(8);
+            int8x16_t lo8 = vsubq_s8(vreinterpretq_s8_u8(vandq_u8(packed, vdupq_n_u8(0x0Fu))), vEight);
+            int8x16_t hi8 = vsubq_s8(vreinterpretq_s8_u8(vshrq_n_u8(packed, 4)), vEight);
+            int16x8_t lo16_0 = vmovl_s8(vget_low_s8(lo8)), lo16_1 = vmovl_s8(vget_high_s8(lo8));
+            int16x8_t hi16_0 = vmovl_s8(vget_low_s8(hi8)), hi16_1 = vmovl_s8(vget_high_s8(hi8));
+            vst1q_f32(bd, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(lo16_0))), vScale));
+            vst1q_f32(bd + 4, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(lo16_0))), vScale));
+            vst1q_f32(bd + 8, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(lo16_1))), vScale));
+            vst1q_f32(bd + 12, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(lo16_1))), vScale));
+            vst1q_f32(bd + 16, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(hi16_0))), vScale));
+            vst1q_f32(bd + 20, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(hi16_0))), vScale));
+            vst1q_f32(bd + 24, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_low_s16(hi16_1))), vScale));
+            vst1q_f32(bd + 28, vmulq_f32(vcvtq_f32_s32(vmovl_s16(vget_high_s16(hi16_1))), vScale));
+#else
             for (int j = 0; j < 16; ++j) {
                 uint8_t byte = bp[2 + j];
                 bd[j] = scale * static_cast<float>((byte & 15) - 8);
                 bd[j + 16] = scale * static_cast<float>((byte >> 4) - 8);
             }
+#endif
         }
     }
 }
@@ -430,50 +548,85 @@ inline float dotProduct(const float* a, const float* b, int n) {
     return sum;
 }
 
-// Custom 4x2 Register-Blocked ARM NEON GEMM kernel: reuses each loaded weight row across 4 time-steps
-std::vector<float> linearOp(const float* x, int count, const Layer& l) {
+// Custom 4x4 (ARM64) / 4x2 (ARMv7) Register-Blocked ARM NEON GEMM kernel with dual-core execution
+void linearOpRange(const float* x, int count, const Layer& l, int oStart, int oEnd, float* yBase) {
     const int out_d = l.out_dim, in_d = l.in_dim;
-    std::vector<float> y(static_cast<size_t>(count) * out_d);
     int t = 0;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    auto hsum = [](float32x4_t v) -> float {
+#if defined(__aarch64__)
+        return vaddvq_f32(v);
+#else
+        float32x2_t p = vadd_f32(vget_low_f32(v), vget_high_f32(v));
+        return vget_lane_f32(vpadd_f32(p, p), 0);
+#endif
+    };
     for (; t + 4 <= count; t += 4) {
         const float* x0 = x + static_cast<size_t>(t) * in_d;
         const float* x1 = x0 + in_d;
         const float* x2 = x1 + in_d;
         const float* x3 = x2 + in_d;
-        float* y0 = y.data() + static_cast<size_t>(t) * out_d;
+        float* y0 = yBase + static_cast<size_t>(t) * out_d;
         float* y1 = y0 + out_d;
         float* y2 = y1 + out_d;
         float* y3 = y2 + out_d;
-        int o = 0;
-        for (; o + 2 <= out_d; o += 2) {
+        int o = oStart;
+#if defined(__aarch64__)
+        for (; o + 4 <= oEnd; o += 4) {
+            const float* w0 = l.weight + static_cast<size_t>(o) * in_d;
+            const float* w1 = w0 + in_d;
+            const float* w2 = w1 + in_d;
+            const float* w3 = w2 + in_d;
+            float32x4_t a00 = vdupq_n_f32(0.0f), a10 = vdupq_n_f32(0.0f), a20 = vdupq_n_f32(0.0f), a30 = vdupq_n_f32(0.0f);
+            float32x4_t a01 = vdupq_n_f32(0.0f), a11 = vdupq_n_f32(0.0f), a21 = vdupq_n_f32(0.0f), a31 = vdupq_n_f32(0.0f);
+            float32x4_t a02 = vdupq_n_f32(0.0f), a12 = vdupq_n_f32(0.0f), a22 = vdupq_n_f32(0.0f), a32 = vdupq_n_f32(0.0f);
+            float32x4_t a03 = vdupq_n_f32(0.0f), a13 = vdupq_n_f32(0.0f), a23 = vdupq_n_f32(0.0f), a33 = vdupq_n_f32(0.0f);
+            int i = 0;
+            for (; i + 4 <= in_d; i += 4) {
+                float32x4_t vw0 = vld1q_f32(w0 + i), vw1 = vld1q_f32(w1 + i);
+                float32x4_t vw2 = vld1q_f32(w2 + i), vw3 = vld1q_f32(w3 + i);
+                float32x4_t vx0 = vld1q_f32(x0 + i), vx1 = vld1q_f32(x1 + i);
+                float32x4_t vx2 = vld1q_f32(x2 + i), vx3 = vld1q_f32(x3 + i);
+                a00 = vmlaq_f32(a00, vw0, vx0); a10 = vmlaq_f32(a10, vw0, vx1); a20 = vmlaq_f32(a20, vw0, vx2); a30 = vmlaq_f32(a30, vw0, vx3);
+                a01 = vmlaq_f32(a01, vw1, vx0); a11 = vmlaq_f32(a11, vw1, vx1); a21 = vmlaq_f32(a21, vw1, vx2); a31 = vmlaq_f32(a31, vw1, vx3);
+                a02 = vmlaq_f32(a02, vw2, vx0); a12 = vmlaq_f32(a12, vw2, vx1); a22 = vmlaq_f32(a22, vw2, vx2); a32 = vmlaq_f32(a32, vw2, vx3);
+                a03 = vmlaq_f32(a03, vw3, vx0); a13 = vmlaq_f32(a13, vw3, vx1); a23 = vmlaq_f32(a23, vw3, vx2); a33 = vmlaq_f32(a33, vw3, vx3);
+            }
+            float b0 = l.bias ? l.bias[o] : 0.0f, b1 = l.bias ? l.bias[o + 1] : 0.0f;
+            float b2 = l.bias ? l.bias[o + 2] : 0.0f, b3 = l.bias ? l.bias[o + 3] : 0.0f;
+            float s00 = b0 + hsum(a00), s10 = b0 + hsum(a10), s20 = b0 + hsum(a20), s30 = b0 + hsum(a30);
+            float s01 = b1 + hsum(a01), s11 = b1 + hsum(a11), s21 = b1 + hsum(a21), s31 = b1 + hsum(a31);
+            float s02 = b2 + hsum(a02), s12 = b2 + hsum(a12), s22 = b2 + hsum(a22), s32 = b2 + hsum(a32);
+            float s03 = b3 + hsum(a03), s13 = b3 + hsum(a13), s23 = b3 + hsum(a23), s33 = b3 + hsum(a33);
+            for (; i < in_d; ++i) {
+                float fw0 = w0[i], fw1 = w1[i], fw2 = w2[i], fw3 = w3[i];
+                s00 += fw0 * x0[i]; s10 += fw0 * x1[i]; s20 += fw0 * x2[i]; s30 += fw0 * x3[i];
+                s01 += fw1 * x0[i]; s11 += fw1 * x1[i]; s21 += fw1 * x2[i]; s31 += fw1 * x3[i];
+                s02 += fw2 * x0[i]; s12 += fw2 * x1[i]; s22 += fw2 * x2[i]; s32 += fw2 * x3[i];
+                s03 += fw3 * x0[i]; s13 += fw3 * x1[i]; s23 += fw3 * x2[i]; s33 += fw3 * x3[i];
+            }
+            y0[o] = s00; y1[o] = s10; y2[o] = s20; y3[o] = s30;
+            y0[o + 1] = s01; y1[o + 1] = s11; y2[o + 1] = s21; y3[o + 1] = s31;
+            y0[o + 2] = s02; y1[o + 2] = s12; y2[o + 2] = s22; y3[o + 2] = s32;
+            y0[o + 3] = s03; y1[o + 3] = s13; y2[o + 3] = s23; y3[o + 3] = s33;
+        }
+#endif
+        for (; o + 2 <= oEnd; o += 2) {
             const float* w0 = l.weight + static_cast<size_t>(o) * in_d;
             const float* w1 = w0 + in_d;
             float32x4_t a00 = vdupq_n_f32(0.0f), a10 = vdupq_n_f32(0.0f), a20 = vdupq_n_f32(0.0f), a30 = vdupq_n_f32(0.0f);
             float32x4_t a01 = vdupq_n_f32(0.0f), a11 = vdupq_n_f32(0.0f), a21 = vdupq_n_f32(0.0f), a31 = vdupq_n_f32(0.0f);
             int i = 0;
             for (; i + 4 <= in_d; i += 4) {
-                float32x4_t vw0 = vld1q_f32(w0 + i);
-                float32x4_t vw1 = vld1q_f32(w1 + i);
-                float32x4_t vx0 = vld1q_f32(x0 + i);
-                float32x4_t vx1 = vld1q_f32(x1 + i);
-                float32x4_t vx2 = vld1q_f32(x2 + i);
-                float32x4_t vx3 = vld1q_f32(x3 + i);
+                float32x4_t vw0 = vld1q_f32(w0 + i), vw1 = vld1q_f32(w1 + i);
+                float32x4_t vx0 = vld1q_f32(x0 + i), vx1 = vld1q_f32(x1 + i);
+                float32x4_t vx2 = vld1q_f32(x2 + i), vx3 = vld1q_f32(x3 + i);
                 a00 = vmlaq_f32(a00, vw0, vx0); a10 = vmlaq_f32(a10, vw0, vx1);
                 a20 = vmlaq_f32(a20, vw0, vx2); a30 = vmlaq_f32(a30, vw0, vx3);
                 a01 = vmlaq_f32(a01, vw1, vx0); a11 = vmlaq_f32(a11, vw1, vx1);
                 a21 = vmlaq_f32(a21, vw1, vx2); a31 = vmlaq_f32(a31, vw1, vx3);
             }
-            auto hsum = [](float32x4_t v) -> float {
-#if defined(__aarch64__)
-                return vaddvq_f32(v);
-#else
-                float32x2_t p = vadd_f32(vget_low_f32(v), vget_high_f32(v));
-                return vget_lane_f32(vpadd_f32(p, p), 0);
-#endif
-            };
-            float b0 = l.bias ? l.bias[o] : 0.0f;
-            float b1 = l.bias ? l.bias[o + 1] : 0.0f;
+            float b0 = l.bias ? l.bias[o] : 0.0f, b1 = l.bias ? l.bias[o + 1] : 0.0f;
             float s00 = b0 + hsum(a00), s10 = b0 + hsum(a10), s20 = b0 + hsum(a20), s30 = b0 + hsum(a30);
             float s01 = b1 + hsum(a01), s11 = b1 + hsum(a11), s21 = b1 + hsum(a21), s31 = b1 + hsum(a31);
             for (; i < in_d; ++i) {
@@ -484,7 +637,7 @@ std::vector<float> linearOp(const float* x, int count, const Layer& l) {
             y0[o] = s00; y1[o] = s10; y2[o] = s20; y3[o] = s30;
             y0[o + 1] = s01; y1[o + 1] = s11; y2[o + 1] = s21; y3[o + 1] = s31;
         }
-        for (; o < out_d; ++o) {
+        for (; o < oEnd; ++o) {
             const float* wr = l.weight + static_cast<size_t>(o) * in_d;
             float b = l.bias ? l.bias[o] : 0.0f;
             y0[o] = b + dotProduct(wr, x0, in_d);
@@ -496,11 +649,25 @@ std::vector<float> linearOp(const float* x, int count, const Layer& l) {
 #endif
     for (; t < count; ++t) {
         const float* xr = x + static_cast<size_t>(t) * in_d;
-        float* yr = y.data() + static_cast<size_t>(t) * out_d;
-        for (int o = 0; o < out_d; ++o) {
+        float* yr = yBase + static_cast<size_t>(t) * out_d;
+        for (int o = oStart; o < oEnd; ++o) {
             const float* wr = l.weight + static_cast<size_t>(o) * in_d;
             yr[o] = (l.bias ? l.bias[o] : 0.0f) + dotProduct(wr, xr, in_d);
         }
+    }
+}
+
+std::vector<float> linearOp(const float* x, int count, const Layer& l) {
+    const int out_d = l.out_dim, in_d = l.in_dim;
+    std::vector<float> y(static_cast<size_t>(count) * out_d);
+    if (static_cast<size_t>(count) * out_d * in_d >= 3200000ULL && out_d >= 64) {
+        const int half_out = (out_d >> 1) & ~3;
+        getWorker().run2(
+            [&]() { linearOpRange(x, count, l, 0, half_out, y.data()); },
+            [&]() { linearOpRange(x, count, l, half_out, out_d, y.data()); }
+        );
+    } else {
+        linearOpRange(x, count, l, 0, out_d, y.data());
     }
     return y;
 }
@@ -590,6 +757,46 @@ inline float32x4_t vexpq_f32_fast(float32x4_t x) {
 
     int32x4_t pow2n = vshlq_n_s32(vaddq_s32(ni, vdupq_n_s32(127)), 23);
     return vmulq_f32(y, vreinterpretq_f32_s32(pow2n));
+}
+
+// Custom 4-wide ARM NEON Cephes minimax sin/cos kernel (< 2e-6 error across cepstral phase range)
+inline void vsincosq_f32_fast(float32x4_t x, float32x4_t* out_sin, float32x4_t* out_cos) {
+    const float32x4_t vTwoOverPi = vdupq_n_f32(0.6366197723675814f);
+    const float32x4_t vHalf = vdupq_n_f32(0.5f);
+    const float32x4_t vOne = vdupq_n_f32(1.0f);
+    const float32x4_t vZero = vdupq_n_f32(0.0f);
+    const float32x4_t vDP1 = vdupq_n_f32(1.5703125f);
+    const float32x4_t vDP2 = vdupq_n_f32(4.837512969970703125e-4f);
+    const float32x4_t vDP3 = vdupq_n_f32(7.549789948768648e-8f);
+
+    float32x4_t ax = vabsq_f32(x);
+    uint32x4_t xNeg = vcltq_f32(x, vZero);
+    int32x4_t j = vcvtq_s32_f32(vmlaq_f32(vHalf, ax, vTwoOverPi));
+    float32x4_t fj = vcvtq_f32_s32(j);
+
+    float32x4_t r = vmlsq_f32(ax, fj, vDP1);
+    r = vmlsq_f32(r, fj, vDP2);
+    r = vmlsq_f32(r, fj, vDP3);
+    float32x4_t z = vmulq_f32(r, r);
+
+    float32x4_t c = vmlaq_f32(vdupq_n_f32(-1.388731625493765e-3f), vdupq_n_f32(2.443315711809948e-5f), z);
+    c = vmlaq_f32(vdupq_n_f32(4.166664568298827e-2f), c, z);
+    c = vmulq_f32(c, vmulq_f32(z, z));
+    c = vmlsq_f32(c, z, vHalf);
+    c = vaddq_f32(c, vOne);
+
+    float32x4_t s = vmlaq_f32(vdupq_n_f32(8.3321608736e-3f), vdupq_n_f32(-1.9515295891e-4f), z);
+    s = vmlaq_f32(vdupq_n_f32(-1.6666654611e-1f), s, z);
+    s = vmlaq_f32(r, vmulq_f32(s, z), r);
+
+    uint32x4_t swapMask = vtstq_u32(vreinterpretq_u32_s32(j), vdupq_n_u32(1u));
+    float32x4_t sinAbs = vbslq_f32(swapMask, c, s);
+    float32x4_t cosAbs = vbslq_f32(swapMask, s, c);
+
+    uint32x4_t sinFlip = veorq_u32(vtstq_u32(vreinterpretq_u32_s32(j), vdupq_n_u32(2u)), xNeg);
+    uint32x4_t cosFlip = vtstq_u32(vreinterpretq_u32_s32(vaddq_s32(j, vdupq_n_s32(1))), vdupq_n_u32(2u));
+    *out_sin = vbslq_f32(sinFlip, vnegq_f32(sinAbs), sinAbs);
+    *out_cos = vbslq_f32(cosFlip, vnegq_f32(cosAbs), cosAbs);
 }
 #endif
 
@@ -787,9 +994,10 @@ std::vector<float> attentionOp(const std::vector<float>& x, int count, const Tra
     };
 
     if (count >= 64 && heads == 4) {
-        std::thread worker(runHeadRange, 0, 2);
-        runHeadRange(2, 4);
-        worker.join();
+        getWorker().run2(
+            [&]() { runHeadRange(0, 2); },
+            [&]() { runHeadRange(2, 4); }
+        );
     } else {
         runHeadRange(0, heads);
     }
@@ -944,22 +1152,34 @@ std::vector<float> filteredSource(const std::vector<float>& source, int size, in
         std::memset(ci.data(), 0, static_cast<size_t>(size) * sizeof(float));
         cepstrum_fn(f, cr);
         plan.run(cr.data(), ci.data());
-        int gk = 0;
+        int k = 0;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
         const float32x4_t vMinG = vdupq_n_f32(-14.0f), vMaxG = vdupq_n_f32(6.0f);
-        for (; gk + 4 <= half + 1; gk += 4) {
-            float32x4_t vc = vmaxq_f32(vMinG, vminq_f32(vMaxG, vld1q_f32(cr.data() + gk)));
-            vst1q_f32(gains.data() + gk, vexpq_f32_fast(vc));
+        for (; k + 4 <= half + 1; k += 4) {
+            float32x4_t vc = vmaxq_f32(vMinG, vminq_f32(vMaxG, vld1q_f32(cr.data() + k)));
+            float32x4_t vGain = vexpq_f32_fast(vc);
+            float32x4_t vSin, vCos;
+            vsincosq_f32_fast(vld1q_f32(ci.data() + k), &vSin, &vCos);
+            float32x4_t vcs = vmulq_f32(vGain, vCos);
+            float32x4_t vsn = vmulq_f32(vGain, vSin);
+            float32x4_t va = vld1q_f32(re.data() + k);
+            float32x4_t vb = vld1q_f32(im.data() + k);
+            float32x4_t nr = vmlsq_f32(vmulq_f32(va, vcs), vb, vsn);
+            float32x4_t ni = vnegq_f32(vmlaq_f32(vmulq_f32(va, vsn), vb, vcs));
+            vst1q_f32(re.data() + k, nr);
+            vst1q_f32(im.data() + k, ni);
         }
 #endif
-        for (; gk <= half; ++gk) gains[gk] = std::exp(std::clamp(cr[gk], -14.0f, 6.0f));
-        for (int k = 0; k <= half; ++k) {
-            float gain = gains[k];
+        for (; k <= half; ++k) {
+            float gain = std::exp(std::clamp(cr[k], -14.0f, 6.0f));
             float cs = gain * std::cos(ci[k]), sn = gain * std::sin(ci[k]);
             float a = re[k], b = im[k];
             re[k] = a * cs - b * sn;
             im[k] = -(a * sn + b * cs);
-            if (k > 0 && k < half) { re[size - k] = re[k]; im[size - k] = -im[k]; }
+        }
+        for (int m = 1; m < half; ++m) {
+            re[size - m] = re[m];
+            im[size - m] = -im[m];
         }
         plan.run(re.data(), im.data());
         float* sum_p = sum.data() + static_cast<size_t>(f) * hop;
@@ -1201,10 +1421,18 @@ std::vector<PhoneUnit> phonemizeDevanagariWord(const std::vector<int>& cps) {
             continue;
         }
         if (cp == 0x0903) { out.push_back({31, 0}); continue; } // ः -> h
-        // Nepali conjunct ज्ञ (ज + ् + ञ -> gya: ɡ + j) and क्ष (क + ् + ष -> chhya / ksha)
-        if (cp == 0x091C && next == 0x094D && next2 == 0x091E) {
-            out.push_back({22, 0});
-            out.push_back({37, 0});
+        // Nepali conjuncts: ज्ञ (ज+्+ञ -> gya: ɡ+j), क्ष (क+्+ष -> chhya: tʃ+h+j), त्र (त+्+र -> t+ɾ), श्र (श+्+र -> ʃ+ɾ), द्य (द+्+य -> d+j)
+        if (next == 0x094D && (
+                (cp == 0x091C && next2 == 0x091E) ||
+                (cp == 0x0915 && next2 == 0x0937) ||
+                (cp == 0x0924 && next2 == 0x0930) ||
+                (cp == 0x0936 && next2 == 0x0930) ||
+                (cp == 0x0926 && next2 == 0x092F))) {
+            if (cp == 0x091C) { out.push_back({22, 0}); out.push_back({37, 0}); }
+            else if (cp == 0x0915) { out.push_back({39, 0}); out.push_back({31, 0}); out.push_back({37, 0}); }
+            else if (cp == 0x0924) { out.push_back({19, 0}); out.push_back({41, 0}); }
+            else if (cp == 0x0936) { out.push_back({29, 0}); out.push_back({41, 0}); }
+            else { out.push_back({20, 0}); out.push_back({37, 0}); }
             i += 2;
             int afterConj = (i + 1 < cps.size()) ? cps[i + 1] : -1;
             if (afterConj == 0x094D) { ++i; continue; }
@@ -1212,6 +1440,16 @@ std::vector<PhoneUnit> phonemizeDevanagariWord(const std::vector<int>& cps) {
             else { pushVowel(43); continue; }
         }
         if (cp >= 0x0904 && cp <= 0x0914) {
+            if ((cp == 0x0905 || cp == 0x0906) && (next == 0x0907 || next == 0x0908)) {
+                pushVowel(60); // अइ/आइ/आई -> aɪ
+                ++i;
+                continue;
+            }
+            if ((cp == 0x0905 || cp == 0x0906) && (next == 0x0909 || next == 0x090A)) {
+                pushVowel(63); // अउ/आउ/आऊ -> aʊ
+                ++i;
+                continue;
+            }
             switch (cp) {
                 case 0x0905: pushVowel(52); break; // अ -> ʌ
                 case 0x0906: pushVowel(53); break; // आ -> ɑː
@@ -1266,7 +1504,14 @@ std::vector<PhoneUnit> phonemizeDevanagariWord(const std::vector<int>& cps) {
                 ++i;
             } else if (next >= 0x093E && next <= 0x094C) {
                 ++i;
-                switch (next) {
+                int afterMatra = (i + 1 < cps.size()) ? cps[i + 1] : -1;
+                if (next == 0x093E && (afterMatra == 0x0907 || afterMatra == 0x0908)) {
+                    pushVowel(60); // -ाइ / -ाई (e.g. मलाई, भाइ, पढाइ) -> aɪ
+                    ++i;
+                } else if (next == 0x093E && (afterMatra == 0x0909 || afterMatra == 0x090A)) {
+                    pushVowel(63); // -ाउ / -ाऊ (e.g. गाउँ, आउनु) -> aʊ
+                    ++i;
+                } else switch (next) {
                     case 0x093E: pushVowel(53); break; // ा -> ɑː
                     case 0x093F: pushVowel(47); break; // ि -> ɪ
                     case 0x0940: pushVowel(49); break; // ी -> iː
@@ -1310,7 +1555,7 @@ void phonemizeText(const VocaModel& m, const std::string& text, std::vector<int>
                 i += 3;
                 continue;
             }
-            if (dev >= 0x0966 && dev <= 0x096F) { // ०..९ Devanagari digits
+            if (dev >= 0x0966 && dev <= 0x096F) { // ०..९ Devanagari digits -> spoken Nepali words
                 long long val = 0;
                 int digits = 0;
                 while (i < n && digits < 9) {
@@ -1320,7 +1565,33 @@ void phonemizeText(const VocaModel& m, const std::string& text, std::vector<int>
                     i += 3;
                     ++digits;
                 }
-                std::string expanded = numberToWords(val);
+                auto nepaliNum = [](long long num) -> std::string {
+                    if (num == 0) return "सुन्ना";
+                    static const char* const kNepOnes[] = {
+                        "", "एक", "दुई", "तीन", "चार", "पाँच", "छ", "सात", "आठ", "नौ",
+                        "दश", "एघार", "बाह्र", "तेह्र", "चौध", "पन्ध्र", "सोह्र", "सत्र", "अठार", "उन्नाइस", "बीस"
+                    };
+                    static const char* const kNepTens[] = {
+                        "", "दश", "बीस", "तीस", "चालीस", "पचास", "साठी", "सत्तरी", "असी", "नब्बे"
+                    };
+                    std::string res;
+                    auto addPart = [&](const std::string& s) {
+                        if (!s.empty()) { if (!res.empty()) res += ' '; res += s; }
+                    };
+                    auto under100 = [&](long long x) -> std::string {
+                        if (x <= 0) return "";
+                        if (x <= 20) return kNepOnes[x];
+                        if (x % 10 == 0) return kNepTens[x / 10];
+                        return std::string(kNepTens[x / 10]) + " " + kNepOnes[x % 10];
+                    };
+                    if (num >= 10000000) { addPart(under100(num / 10000000) + " करोड"); num %= 10000000; }
+                    if (num >= 100000) { addPart(under100(num / 100000) + " लाख"); num %= 100000; }
+                    if (num >= 1000) { addPart(under100(num / 1000) + " हजार"); num %= 1000; }
+                    if (num >= 100) { addPart(std::string(kNepOnes[num / 100]) + " सय"); num %= 100; }
+                    if (num > 0) addPart(under100(num));
+                    return res;
+                };
+                std::string expanded = nepaliNum(val);
                 std::vector<int> sub_ids, sub_st;
                 phonemizeText(m, expanded, &sub_ids, &sub_st);
                 if (sub_ids.size() > 2) {
@@ -1484,7 +1755,7 @@ std::vector<float> synthesizeUtterance(const VocaModel& m, const std::vector<int
     auto acoustic = transformerOp(std::move(pproj), frames, m.acoustic_stack, kHeads);
 
     const int samples = frames * kHop;
-    std::vector<float> noise_part;
+    std::vector<float> noise_part, voiced;
     auto computeNoise = [&]() {
         auto g = linearOp(acoustic.data(), frames, m.voc_noise);
         const int gw = m.voc_noise.out_dim, g_steps = kHop / kNoiseHop;
@@ -1499,35 +1770,52 @@ std::vector<float> synthesizeUtterance(const VocaModel& m, const std::vector<int
             }
         );
     };
-    std::thread noiseThread;
+    auto computeHarmonic = [&]() {
+        auto h = linearOp(acoustic.data(), frames, m.voc_harm);
+        const int hw = m.voc_harm.out_dim, h_steps = kHop / kSynthHop;
+        voiced = filteredSource(
+            pulseTrainSource(f0, kHop, kSampleRate, kHarmonicLimit),
+            kSynthFft, kSynthHop, h_steps * frames + 3,
+            [&](int f, std::vector<float>& cep) {
+                int sub = std::min(f, h_steps * frames - 1);
+                int here = sub / h_steps, next = std::min((sub + 1) / h_steps, frames - 1);
+                for (int i = 0; i < kCepCausal; ++i) {
+                    cep[i] = static_cast<float>(0.5 * (h[here * hw + i] + h[next * hw + i]) * lifterCoeff(i));
+                }
+                for (int i = 0; i < kCepAnti; ++i) {
+                    int at = kCepCausal + i;
+                    cep[kSynthFft - 1 - i] = static_cast<float>(0.5 * (h[here * hw + at] + h[next * hw + at]) * lifterCoeff(i + 1));
+                }
+                cep[0] += h[here * hw + kCepCausal + kCepAnti + (sub % h_steps)];
+            }
+        );
+    };
     if (frames >= 24) {
-        noiseThread = std::thread(computeNoise);
+        getWorker().run2(computeNoise, computeHarmonic);
     } else {
         computeNoise();
+        computeHarmonic();
     }
 
-    auto h = linearOp(acoustic.data(), frames, m.voc_harm);
-    const int hw = m.voc_harm.out_dim, h_steps = kHop / kSynthHop;
-    auto voiced = filteredSource(
-        pulseTrainSource(f0, kHop, kSampleRate, kHarmonicLimit),
-        kSynthFft, kSynthHop, h_steps * frames + 3,
-        [&](int f, std::vector<float>& cep) {
-            int sub = std::min(f, h_steps * frames - 1);
-            int here = sub / h_steps, next = std::min((sub + 1) / h_steps, frames - 1);
-            for (int i = 0; i < kCepCausal; ++i) {
-                cep[i] = static_cast<float>(0.5 * (h[here * hw + i] + h[next * hw + i]) * lifterCoeff(i));
-            }
-            for (int i = 0; i < kCepAnti; ++i) {
-                int at = kCepCausal + i;
-                cep[kSynthFft - 1 - i] = static_cast<float>(0.5 * (h[here * hw + at] + h[next * hw + at]) * lifterCoeff(i + 1));
-            }
-            cep[0] += h[here * hw + kCepCausal + kCepAnti + (sub % h_steps)];
-        }
-    );
-    if (noiseThread.joinable()) noiseThread.join();
-
     float peak = 0.0f;
-    for (int i = 0; i < samples; ++i) {
+    int i = 0;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    float32x4_t vMax = vdupq_n_f32(0.0f);
+    for (; i + 8 <= samples; i += 8) {
+        float32x4_t s0 = vaddq_f32(vld1q_f32(voiced.data() + i), vld1q_f32(noise_part.data() + i));
+        float32x4_t s1 = vaddq_f32(vld1q_f32(voiced.data() + i + 4), vld1q_f32(noise_part.data() + i + 4));
+        vst1q_f32(voiced.data() + i, s0);
+        vst1q_f32(voiced.data() + i + 4, s1);
+        vMax = vmaxq_f32(vMax, vmaxq_f32(vabsq_f32(s0), vabsq_f32(s1)));
+    }
+#if defined(__aarch64__)
+    peak = vmaxvq_f32(vMax);
+#else
+    float32x2_t m2 = vmax_f32(vget_low_f32(vMax), vget_high_f32(vMax));
+    peak = vget_lane_f32(vpmax_f32(m2, m2), 0);
+#endif
+#endif
+    for (; i < samples; ++i) {
         voiced[i] += noise_part[i];
         peak = std::max(peak, std::abs(voiced[i]));
     }

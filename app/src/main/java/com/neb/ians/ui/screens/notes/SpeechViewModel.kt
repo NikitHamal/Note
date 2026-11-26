@@ -58,7 +58,12 @@ class SpeechViewModel @Inject constructor(
             phonon.stop()
             return
         }
-        phonon.play(listOf("Hello, this is how I will read your notes."), 0, name)
+        val samples = if (name == "F2" || name == "M2") {
+            listOf("नमस्ते, म तपाईंको टिपोट यसरी पढ्नेछु।", "Hello, this is how I will read your notes.")
+        } else {
+            listOf("Hello, this is how I will read your notes.")
+        }
+        phonon.play(samples, 0, name)
     }
 
     fun clearError() = phonon.clearError()

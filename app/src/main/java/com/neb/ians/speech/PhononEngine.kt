@@ -107,6 +107,21 @@ class PhononEngine @Inject constructor(
         if (_state.value is ReadState.Error) _state.value = ReadState.Idle
     }
 
+    /** Pre-warms TinyVoca on the background engine thread so Read-Aloud starts with zero cold-load latency. */
+    fun prewarmIfInstalled() {
+        if (!supported || run != null) return
+        if (models.activeTtsModel() == SpeechModelId.TinyVoca && models.isInstalled(SpeechModelId.TinyVoca)) {
+            idleJob?.cancel()
+            scope.launch(engineThread) {
+                runCatching { ensureVocaLoaded() }
+                idleJob = scope.launch(engineThread) {
+                    delay(90_000)
+                    if (run == null) release()
+                }
+            }
+        }
+    }
+
     fun play(segments: List<String>, from: Int = 0, voice: String? = null) {
         if (segments.isEmpty()) return
         if (!supported) { _state.value = ReadState.Error("Text to speech is not available on this device"); return }

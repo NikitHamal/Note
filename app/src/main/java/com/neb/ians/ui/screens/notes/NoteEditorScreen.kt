@@ -334,7 +334,13 @@ fun NoteEditorScreen(
         val topBarTile = if (coverIndex != 0) bg.copy(alpha = 0.72f) else surfaceTile
         NoteTopBar(
             container = topBarTile, content = fg, canUndo = canUndo, canRedo = canRedo, pinned = pinned, trashed = trashed,
-            onBack = { leave() }, onUndo = vm::undo, onRedo = vm::redo, onPin = vm::togglePin, onMore = { menu = true },
+            reading = reading,
+            onBack = { leave() }, onUndo = vm::undo, onRedo = vm::redo,
+            onReadAloud = {
+                tactile.perform(TactileType.LightTap)
+                if (reading) vm.readStop() else beginListening()
+            },
+            onPin = vm::togglePin, onMore = { menu = true },
             modifier = Modifier.align(Alignment.TopCenter)
                 .drawBehind { drawRect(bg, alpha = ((bodyScroll.value - stripAfter) / 24f).coerceIn(0f, 1f)) },
         )

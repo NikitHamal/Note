@@ -113,6 +113,16 @@ class WhistleEngine @Inject constructor(
         if (_state.value is DictationState.Error) _state.value = DictationState.Idle
     }
 
+    /** Pre-maps and warms the active STT model on the background engine thread so Dictate starts in < 15ms. */
+    fun prewarmIfInstalled() {
+        if (isRunning || !supported || !models.isAnySttInstalled()) return
+        idleJob?.cancel()
+        scope.launch(engineThread) {
+            runCatching { ensureLoaded() }
+            scheduleIdleTrim()
+        }
+    }
+
     /** The caller has already been granted RECORD_AUDIO. */
     fun start() {
         if (isRunning) return
@@ -440,6 +450,8 @@ class WhistleEngine @Inject constructor(
             codec.configure(format, null, null, 0)
             codec.start()
             val info = android.media.MediaCodec.BufferInfo()
+            val shortScratch = ShortArray(8192)
+            val floatScratch = FloatArray(8192)
             var sawInputEOS = false
             var sawOutputEOS = false
             var idleSpin = 0
@@ -473,25 +485,43 @@ class WhistleEngine @Inject constructor(
                             outBuf.position(info.offset)
                             outBuf.limit(info.offset + info.size)
                             outBuf.order(java.nio.ByteOrder.nativeOrder())
+                            val invCh = 1f / channels
                             if (pcmEncoding == android.media.AudioFormat.ENCODING_PCM_FLOAT) {
                                 val floats = outBuf.asFloatBuffer()
-                                val nFloats = floats.remaining()
-                                var sIdx = 0
-                                while (sIdx + channels <= nFloats) {
-                                    var sum = 0f
-                                    for (ch in 0 until channels) sum += floats.get(sIdx + ch)
-                                    feedMonoSample(sum / channels)
-                                    sIdx += channels
+                                val frameAligned = (floatScratch.size / channels) * channels
+                                while (floats.remaining() >= channels) {
+                                    val chunk = min(floats.remaining() / channels * channels, frameAligned)
+                                    floats.get(floatScratch, 0, chunk)
+                                    if (channels == 1) {
+                                        for (i in 0 until chunk) feedMonoSample(floatScratch[i])
+                                    } else {
+                                        var sIdx = 0
+                                        while (sIdx < chunk) {
+                                            var sum = 0f
+                                            for (ch in 0 until channels) sum += floatScratch[sIdx + ch]
+                                            feedMonoSample(sum * invCh)
+                                            sIdx += channels
+                                        }
+                                    }
                                 }
                             } else {
                                 val shorts = outBuf.asShortBuffer()
-                                val nShorts = shorts.remaining()
-                                var sIdx = 0
-                                while (sIdx + channels <= nShorts) {
-                                    var sum = 0f
-                                    for (ch in 0 until channels) sum += shorts.get(sIdx + ch) * (1f / 32768f)
-                                    feedMonoSample(sum / channels)
-                                    sIdx += channels
+                                val frameAligned = (shortScratch.size / channels) * channels
+                                val invScale = (1f / 32768f) * invCh
+                                while (shorts.remaining() >= channels) {
+                                    val chunk = min(shorts.remaining() / channels * channels, frameAligned)
+                                    shorts.get(shortScratch, 0, chunk)
+                                    if (channels == 1) {
+                                        for (i in 0 until chunk) feedMonoSample(shortScratch[i] * (1f / 32768f))
+                                    } else {
+                                        var sIdx = 0
+                                        while (sIdx < chunk) {
+                                            var sum = 0
+                                            for (ch in 0 until channels) sum += shortScratch[sIdx + ch].toInt()
+                                            feedMonoSample(sum * invScale)
+                                            sIdx += channels
+                                        }
+                                    }
                                 }
                             }
                         }

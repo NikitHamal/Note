@@ -121,6 +121,8 @@ class NoteEditorViewModel @Inject constructor(
                 NoteTemplate.take()?.takeIf { it != NoteTemplate.Blank }?.let { _blocks.value = it.blocks() }
             }
             _ready.value = true
+            whistle.prewarmIfInstalled()
+            phonon.prewarmIfInstalled()
         }
         viewModelScope.launch {
             whistle.committed.collect { insertDictated(it) }
@@ -977,7 +979,17 @@ class NoteEditorViewModel @Inject constructor(
             .replace("अल्पविराम", ",")
             .replace("प्रश्न चिन्ह", "?")
             .replace("प्रश्नचिन्ह", "?")
-            .replace(Regex("\\s+([।,?!])"), "$1")
+            .replace("उद्गार चिन्ह", "!")
+            .replace("विस्मयादिबोधक चिन्ह", "!")
+            .replace("नयाँ लाइन", "\n")
+            .replace("नयाँ हरफ", "\n")
+            .replace("अर्को लाइन", "\n")
+            .replace(Regex("\\bfull stop\\b", RegexOption.IGNORE_CASE), ".")
+            .replace(Regex("\\bquestion mark\\b", RegexOption.IGNORE_CASE), "?")
+            .replace(Regex("\\bexclamation mark\\b", RegexOption.IGNORE_CASE), "!")
+            .replace(Regex("\\bnew line\\b", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("[ \\t]+([।.,?!])"), "$1")
+            .replace(Regex("[ \\t]*\\n[ \\t]*"), "\n")
         return s
     }
 

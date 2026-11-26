@@ -12,7 +12,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Redo
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Undo
+import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -20,12 +22,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
-/** The floating controls of a page: round back, joined undo and redo, pin, more. */
+/** The floating controls of a page: round back, joined undo and redo, read aloud, pin, more. */
 @Composable
 internal fun NoteTopBar(
     container: Color, content: Color,
     canUndo: Boolean, canRedo: Boolean, pinned: Boolean, trashed: Boolean,
-    onBack: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit, onPin: () -> Unit, onMore: () -> Unit,
+    reading: Boolean = false,
+    onBack: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit,
+    onReadAloud: (() -> Unit)? = null,
+    onPin: () -> Unit, onMore: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val c = MaterialTheme.colorScheme
@@ -39,6 +44,16 @@ internal fun NoteTopBar(
             }
         }
         Spacer(Modifier.weight(1f))
+        if (onReadAloud != null) {
+            NoteButton(
+                if (reading) Icons.Outlined.Stop else Icons.Outlined.VolumeUp,
+                if (reading) "Stop reading" else "Read aloud",
+                onReadAloud,
+                container = if (reading) c.primaryContainer else container,
+                content = if (reading) c.onPrimaryContainer else content,
+            )
+            Spacer(Modifier.width(8.dp))
+        }
         if (!trashed) {
             NoteButton(
                 Icons.Outlined.PushPin, if (pinned) "Unpin" else "Pin", onPin,

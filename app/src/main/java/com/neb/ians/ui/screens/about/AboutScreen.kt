@@ -150,22 +150,22 @@ private val Kernels = listOf(
     KernelSpec(
         shape = NebGlyphShapes.Cookie,
         icon = Icons.Outlined.Memory,
-        title = "4x2 ARM NEON GEMM",
-        detail = "Register-blocked matrix kernel reuses weight rows across 4 time-steps in 16 SIMD accumulators",
+        title = "4x4 Dual-Core NEON GEMM",
+        detail = "Register-blocked 4x4 ARM64 SIMD matrix kernel + persistent worker pool and NEON Q8/Q4 dequantizer",
         toneIndex = 0,
     ),
     KernelSpec(
         shape = NebGlyphShapes.Sunny,
         icon = Icons.Outlined.Bolt,
         title = "Single-Pass Needle ASR",
-        detail = "Direct needle_transcribe batch path + rolling 8.5s VAD pause reset for lag-free dictation",
+        detail = "Direct needle_transcribe batch path, pre-warmed model mapping, and rolling 8.5s VAD pause reset",
         toneIndex = 1,
     ),
     KernelSpec(
         shape = NebGlyphShapes.Flower,
         icon = Icons.Outlined.Speed,
-        title = "NEON vexpq_f32 & O(T) Attention",
-        detail = "4-wide Cephes NEON exp, precomputed RoPE, L1 softmax rows, and dual-core attention + vocoder",
+        title = "NEON vexpq / vsincosq & O(T) Attention",
+        detail = "4-wide Cephes NEON exp + sincos, precomputed RoPE, L1 softmax rows, and dual-core attention + vocoder",
         toneIndex = 2,
     ),
     KernelSpec(

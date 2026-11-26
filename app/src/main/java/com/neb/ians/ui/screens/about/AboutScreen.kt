@@ -318,7 +318,7 @@ private fun Poster(onOpenVoice: () -> Unit) {
                 )
                 NebMorphBlob(
                     shapes = shapes,
-                    position = morphPos,
+                    position = { morphPos },
                     color = scheme.primaryContainer,
                     modifier = Modifier.fillMaxSize(),
                 )

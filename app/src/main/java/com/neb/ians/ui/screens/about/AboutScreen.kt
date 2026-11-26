@@ -164,15 +164,15 @@ private val Kernels = listOf(
     KernelSpec(
         shape = NebGlyphShapes.Flower,
         icon = Icons.Outlined.Speed,
-        title = "Vectorized NEON FFT & GELU",
-        detail = "4-wide complex butterfly SIMD stages + Abramowitz-Stegun NEON GELU and LayerNorm",
+        title = "NEON vexpq_f32 & O(T) Attention",
+        detail = "4-wide Cephes NEON exp, precomputed RoPE, L1 softmax rows, and dual-core attention + vocoder",
         toneIndex = 2,
     ),
     KernelSpec(
         shape = NebGlyphShapes.Gem,
         icon = Icons.Outlined.Mic,
-        title = "Hardware FTZ & Auto-Gain",
-        detail = "ARM64/ARMv7 Flush-To-Zero denormal elimination + zero-copy JNI NEON mic normalization",
+        title = "Hardware FTZ & 16-Wide VAD",
+        detail = "ARM64/ARMv7 Flush-To-Zero denormal elimination + 16-wide NEON silence trimmer and auto-gain",
         toneIndex = 0,
     ),
 )
